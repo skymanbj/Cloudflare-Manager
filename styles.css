@@ -391,7 +391,8 @@ body {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  padding: var(--spacing-md);
+  padding: 0 var(--spacing-md);
+  height: 36px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -421,6 +422,8 @@ body {
   padding: var(--spacing-xs);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
+  height: 38px;
+  box-sizing: border-box;
 }
 
 .tab {
@@ -1041,11 +1044,11 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
   border-bottom: 1px solid var(--border);
   background: var(--bg-hover);
   flex-wrap: wrap;
-  gap: var(--spacing-md);
+  gap: var(--spacing-sm);
 }
 
 .dns-header h2 {
@@ -1111,7 +1114,7 @@ body {
 .search-input {
   width: 280px;
   padding: var(--spacing-sm) var(--spacing-md);
-  padding-left: 36px;
+  padding-left: var(--spacing-md);
   padding-right: 32px;
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -1383,13 +1386,39 @@ body {
   overflow: hidden;
 }
 
-/* 笔记统计栏 */
-.notes-stats-bar {
+/* 笔记标题栏合并样式 */
+.notes-header-combined {
+  flex-wrap: nowrap;
+}
+
+.notes-header-left {
   display: flex;
+  align-items: center;
   gap: var(--spacing-md);
-  padding: var(--spacing-md);
-  background: var(--bg-hover);
-  border-bottom: 1px solid var(--border);
+}
+
+.notes-header-left h2 {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.notes-stats-inline {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.notes-stat-inline {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.notes-stat-inline span:first-child {
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .notes-stat-item {
@@ -1400,7 +1429,7 @@ body {
 }
 
 .notes-stat-number {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--primary);
 }

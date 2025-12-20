@@ -242,10 +242,6 @@
                         </select>
                     </div>
                     <div class="search-box">
-                        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none">
-                            <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/>
-                            <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                        </svg>
                         <input type="text" id="searchInput" class="search-input" placeholder="搜索记录...">
                         <button id="clearSearchBtn" class="clear-search-btn" style="display: none;">×</button>
                     </div>
@@ -317,10 +313,6 @@
                 <h2>Workers 项目</h2>
                 <div class="dns-header-actions">
                     <div class="search-box">
-                        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none">
-                            <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/>
-                            <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                        </svg>
                         <input type="text" id="workersSearchInput" class="search-input" placeholder="搜索 Workers...">
                     </div>
                 </div>
@@ -336,10 +328,6 @@
                 <h2>Pages 项目</h2>
                 <div class="dns-header-actions">
                     <div class="search-box">
-                        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none">
-                            <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/>
-                            <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                        </svg>
                         <input type="text" id="pagesSearchInput" class="search-input" placeholder="搜索 Pages...">
                     </div>
                 </div>
@@ -351,14 +339,19 @@
 
         <!-- 笔记/备注区域 -->
         <div id="notesSection" class="notes-section-main" style="display: none;">
-            <div class="dns-header">
-                <h2>📝 资源备注</h2>
+            <div class="dns-header notes-header-combined">
+                <div class="notes-header-left">
+                    <h2>📝 资源备注</h2>
+                    <div class="notes-stats-inline">
+                        <span class="notes-stat-inline"><span id="totalRemarksCount">0</span> 总</span>
+                        <span class="notes-stat-inline"><span id="zoneRemarksCount">0</span> 域名</span>
+                        <span class="notes-stat-inline"><span id="dnsRemarksCount">0</span> DNS</span>
+                        <span class="notes-stat-inline"><span id="workerRemarksCount">0</span> Workers</span>
+                        <span class="notes-stat-inline"><span id="pageRemarksCount">0</span> Pages</span>
+                    </div>
+                </div>
                 <div class="dns-header-actions">
                     <div class="search-box">
-                        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none">
-                            <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/>
-                            <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                        </svg>
                         <input type="text" id="remarksSearchInput" class="search-input" placeholder="搜索备注...">
                     </div>
                     <select id="remarksTypeFilter" class="filter-select">
@@ -371,30 +364,6 @@
                     <button id="exportRemarksBtn" class="btn-secondary btn-sm" title="导出备注">
                         📤 导出
                     </button>
-                </div>
-            </div>
-
-            <!-- 备注统计 -->
-            <div class="notes-stats-bar">
-                <div class="notes-stat-item">
-                    <span class="notes-stat-number" id="totalRemarksCount">0</span>
-                    <span class="notes-stat-label">总备注</span>
-                </div>
-                <div class="notes-stat-item">
-                    <span class="notes-stat-number" id="zoneRemarksCount">0</span>
-                    <span class="notes-stat-label">域名</span>
-                </div>
-                <div class="notes-stat-item">
-                    <span class="notes-stat-number" id="dnsRemarksCount">0</span>
-                    <span class="notes-stat-label">DNS</span>
-                </div>
-                <div class="notes-stat-item">
-                    <span class="notes-stat-number" id="workerRemarksCount">0</span>
-                    <span class="notes-stat-label">Workers</span>
-                </div>
-                <div class="notes-stat-item">
-                    <span class="notes-stat-number" id="pageRemarksCount">0</span>
-                    <span class="notes-stat-label">Pages</span>
                 </div>
             </div>
 
