@@ -713,6 +713,24 @@ class CloudflareManager {
             exportRemarksBtn.addEventListener('click', () => this.exportRemarks());
         }
         
+        // DNS 导出按钮
+        const exportDnsBtn = document.getElementById('exportDnsBtn');
+        if (exportDnsBtn) {
+            exportDnsBtn.addEventListener('click', () => this.exportDnsData());
+        }
+        
+        // Workers 导出按钮
+        const exportWorkersBtn = document.getElementById('exportWorkersBtn');
+        if (exportWorkersBtn) {
+            exportWorkersBtn.addEventListener('click', () => this.exportWorkersData());
+        }
+        
+        // Pages 导出按钮
+        const exportPagesBtn = document.getElementById('exportPagesBtn');
+        if (exportPagesBtn) {
+            exportPagesBtn.addEventListener('click', () => this.exportPagesData());
+        }
+        
         // 备注弹窗事件
         const closeRemarkModal = document.getElementById('closeRemarkModal');
         if (closeRemarkModal) {
@@ -1514,7 +1532,7 @@ class CloudflareManager {
     // =====================================================
     // Export - 导出所有记录
     // =====================================================
-    exportRecords() {
+    async exportRecords() {
         if (this.allRecords.length === 0) {
             this.showToast('没有可导出的记录', 'warning');
             return;
@@ -1531,22 +1549,93 @@ class CloudflareManager {
         ]);
         
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+        const filename = `all_dns_records_${new Date().toISOString().slice(0,10)}.csv`;
         
-        this.downloadCSV(csv, `all_dns_records_${new Date().toISOString().slice(0,10)}.csv`);
-        this.showToast(`已导出 ${this.allRecords.length} 条记录`, 'success');
+        const result = await this.downloadCSV(csv, filename);
     }
 
-    exportData() {
-        if (this.currentTab === 'dns') {
-            this.exportRecords();
-        } else if (this.currentTab === 'workers') {
-            this.exportWorkers();
-        } else if (this.currentTab === 'pages') {
-            this.exportPages();
+    async exportData() {
+        // 导出所有数据到一个 JSON 文件
+        const allData = {
+            exportDate: new Date().toISOString(),
+            zones: this.zones.map(z => ({
+                id: z.id,
+                name: z.name,
+                status: z.status
+            })),
+            dnsRecords: this.allRecords.map(r => ({
+                zoneName: r.zoneName,
+                type: r.type,
+                name: r.name,
+                content: r.content,
+                ttl: r.ttl,
+                proxied: r.proxied
+            })),
+            workers: this.workers.map(w => ({
+                id: w.id,
+                created_on: w.created_on,
+                modified_on: w.modified_on
+            })),
+            pages: this.pages.map(p => ({
+                name: p.name,
+                subdomain: p.subdomain || p.name,
+                url: `https://${p.subdomain || p.name}.pages.dev`,
+                created_on: p.created_on
+            })),
+            remarks: Object.entries(this.remarks)
+                .filter(([_, v]) => v.content)
+                .map(([key, value]) => ({
+                    key,
+                    ...value
+                }))
+        };
+        
+        // 获取当前账户名称
+        // 1. 从 accounts 数组中查找当前账户
+        // 2. 从下拉框获取选中的文本
+        // 3. 使用 currentAccount.name
+        let accountName = 'cloudflare';
+        
+        // 方法1：从 accounts 数组查找
+        if (this.currentAccount?.id) {
+            const account = this.accounts.find(a => a.id === this.currentAccount.id);
+            if (account?.name) {
+                accountName = account.name;
+            }
         }
+        
+        // 方法2：如果还是默认值，尝试从下拉框获取
+        if (accountName === 'cloudflare') {
+            const accountSelect = document.getElementById('accountSelect');
+            const selectedText = accountSelect?.selectedOptions[0]?.textContent;
+            if (selectedText && selectedText !== '请选择账户') {
+                accountName = selectedText;
+            }
+        }
+        
+        // 如果账户名看起来像是 UUID，则使用默认名
+        if (accountName.length > 30 && (accountName.match(/-/g) || []).length >= 3) {
+            accountName = 'cloudflare';
+        }
+        
+        console.log('导出文件名使用账户名:', accountName); // 调试日志
+        
+        // 替换文件名中不允许的字符
+        const safeAccountName = accountName.replace(/[<>:"/\\|?*]/g, '_');
+        // 生成日期时间字符串：YYYYMMDD-HHMMSS
+        const now = new Date();
+        const dateTime = now.getFullYear().toString() +
+            (now.getMonth() + 1).toString().padStart(2, '0') +
+            now.getDate().toString().padStart(2, '0') + '-' +
+            now.getHours().toString().padStart(2, '0') +
+            now.getMinutes().toString().padStart(2, '0') +
+            now.getSeconds().toString().padStart(2, '0');
+        const filename = `${safeAccountName}-${dateTime}.json`;
+        await this.downloadJSON(allData, filename);
+        // 注意：使用 a 标签下载无法准确知道用户是否完成保存，所以不显示完成消息
     }
 
-    exportWorkers() {
+    async exportWorkers() {
         if (this.workers.length === 0) {
             this.showToast('没有可导出的 Workers', 'warning');
             return;
@@ -1560,9 +1649,9 @@ class CloudflareManager {
         ]);
         
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+        const filename = `workers_${new Date().toISOString().slice(0,10)}.csv`;
         
-        this.downloadCSV(csv, `workers_${new Date().toISOString().slice(0,10)}.csv`);
-        this.showToast(`已导出 ${this.workers.length} 个 Workers`, 'success');
+        const result = await this.downloadCSV(csv, filename);
     }
 
     async refresh() {
@@ -1802,7 +1891,7 @@ class CloudflareManager {
         });
     }
 
-    exportPages() {
+    async exportPages() {
         if (this.pages.length === 0) {
             this.showToast('没有可导出的 Pages', 'warning');
             return;
@@ -1817,9 +1906,9 @@ class CloudflareManager {
         ]);
         
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+        const filename = `pages_${new Date().toISOString().slice(0,10)}.csv`;
         
-        this.downloadCSV(csv, `pages_${new Date().toISOString().slice(0,10)}.csv`);
-        this.showToast(`已导出 ${this.pages.length} 个 Pages`, 'success');
+        const result = await this.downloadCSV(csv, filename);
     }
 
     // =====================================================
@@ -1827,52 +1916,56 @@ class CloudflareManager {
     // =====================================================
     
     /**
-     * 使用 chrome.downloads API 下载 CSV 文件
-     * 在扩展弹出窗口中，<a>.click() 方式不可靠，需要使用 chrome.downloads API
+     * 使用 <a> 标签下载 CSV 文件
      */
     downloadCSV(csvContent, filename) {
-        // 添加 BOM 以确保 Excel 正确识别 UTF-8 编码
-        const BOM = '\uFEFF';
-        const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        
-        chrome.downloads.download({
-            url: url,
-            filename: filename,
-            saveAs: true
-        }, (downloadId) => {
-            // 清理 Object URL
+        return new Promise((resolve) => {
+            // 添加 BOM 以确保 Excel 正确识别 UTF-8 编码
+            const BOM = '\uFEFF';
+            const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            
+            // 使用 <a> 标签下载
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
             setTimeout(() => {
                 URL.revokeObjectURL(url);
             }, 1000);
             
-            if (chrome.runtime.lastError) {
-                console.error('下载失败:', chrome.runtime.lastError);
-                this.showToast('下载失败: ' + chrome.runtime.lastError.message, 'error');
-            }
+            resolve({ success: true, filename: filename });
         });
     }
     
     /**
      * 使用 chrome.downloads API 下载 JSON 文件
+     * @returns {Promise<{success: boolean, filename?: string}>}
      */
     downloadJSON(data, filename) {
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        
-        chrome.downloads.download({
-            url: url,
-            filename: filename,
-            saveAs: true
-        }, (downloadId) => {
+        console.log('downloadJSON 接收到的文件名:', filename);
+        return new Promise((resolve) => {
+            const jsonString = JSON.stringify(data, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            // 使用 <a> 标签下载，确保文件名正确
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            // 延迟清理 URL
             setTimeout(() => {
                 URL.revokeObjectURL(url);
             }, 1000);
             
-            if (chrome.runtime.lastError) {
-                console.error('下载失败:', chrome.runtime.lastError);
-                this.showToast('下载失败: ' + chrome.runtime.lastError.message, 'error');
-            }
+            resolve({ success: true, filename: filename });
         });
     }
     
@@ -2401,7 +2494,7 @@ class CloudflareManager {
     /**
      * 导出备注
      */
-    exportRemarks() {
+    async exportRemarks() {
         const remarksArray = Object.entries(this.remarks)
             .map(([key, value]) => ({
                 key,
@@ -2419,8 +2512,140 @@ class CloudflareManager {
             remarks: remarksArray
         };
         
-        this.downloadJSON(data, `cloudflare-remarks-${new Date().toISOString().slice(0,10)}.json`);
-        this.showToast('备注已导出', 'success');
+        // 获取账户名称
+        let accountName = 'cloudflare';
+        if (this.currentAccount?.id) {
+            const account = this.accounts.find(a => a.id === this.currentAccount.id);
+            if (account?.name) {
+                accountName = account.name;
+            }
+        }
+        if (accountName === 'cloudflare') {
+            const accountSelect = document.getElementById('accountSelect');
+            const selectedText = accountSelect?.selectedOptions[0]?.textContent;
+            if (selectedText && selectedText !== '请选择账户') {
+                accountName = selectedText;
+            }
+        }
+        const safeAccountName = accountName.replace(/[<>:"/\\|?*]/g, '_');
+        
+        // 生成日期时间
+        const now = new Date();
+        const dateTime = now.getFullYear().toString() +
+            (now.getMonth() + 1).toString().padStart(2, '0') +
+            now.getDate().toString().padStart(2, '0') + '-' +
+            now.getHours().toString().padStart(2, '0') +
+            now.getMinutes().toString().padStart(2, '0') +
+            now.getSeconds().toString().padStart(2, '0');
+        
+        const filename = `${safeAccountName}-remark-${dateTime}.json`;
+        const result = await this.downloadJSON(data, filename);
+    }
+    
+    /**
+     * 获取账户名称和日期时间用于文件名
+     */
+    getExportFilename(suffix = '') {
+        let accountName = 'cloudflare';
+        if (this.currentAccount?.id) {
+            const account = this.accounts.find(a => a.id === this.currentAccount.id);
+            if (account?.name) {
+                accountName = account.name;
+            }
+        }
+        if (accountName === 'cloudflare') {
+            const accountSelect = document.getElementById('accountSelect');
+            const selectedText = accountSelect?.selectedOptions[0]?.textContent;
+            if (selectedText && selectedText !== '请选择账户') {
+                accountName = selectedText;
+            }
+        }
+        const safeAccountName = accountName.replace(/[<>:"/\\|?*]/g, '_');
+        
+        const now = new Date();
+        const dateTime = now.getFullYear().toString() +
+            (now.getMonth() + 1).toString().padStart(2, '0') +
+            now.getDate().toString().padStart(2, '0') + '-' +
+            now.getHours().toString().padStart(2, '0') +
+            now.getMinutes().toString().padStart(2, '0') +
+            now.getSeconds().toString().padStart(2, '0');
+        
+        return suffix ? `${safeAccountName}-${suffix}-${dateTime}.json` : `${safeAccountName}-${dateTime}.json`;
+    }
+    
+    /**
+     * 导出 DNS 数据
+     */
+    async exportDnsData() {
+        if (this.allRecords.length === 0) {
+            this.showToast('没有可导出的 DNS 记录', 'warning');
+            return;
+        }
+        
+        const data = {
+            exportDate: new Date().toISOString(),
+            zones: this.zones.map(z => ({
+                id: z.id,
+                name: z.name,
+                status: z.status
+            })),
+            dnsRecords: this.allRecords.map(r => ({
+                zoneName: r.zoneName,
+                type: r.type,
+                name: r.name,
+                content: r.content,
+                ttl: r.ttl,
+                proxied: r.proxied
+            }))
+        };
+        
+        const filename = this.getExportFilename('dns');
+        await this.downloadJSON(data, filename);
+    }
+    
+    /**
+     * 导出 Workers 数据
+     */
+    async exportWorkersData() {
+        if (this.workers.length === 0) {
+            this.showToast('没有可导出的 Workers', 'warning');
+            return;
+        }
+        
+        const data = {
+            exportDate: new Date().toISOString(),
+            workers: this.workers.map(w => ({
+                id: w.id,
+                created_on: w.created_on,
+                modified_on: w.modified_on
+            }))
+        };
+        
+        const filename = this.getExportFilename('workers');
+        await this.downloadJSON(data, filename);
+    }
+    
+    /**
+     * 导出 Pages 数据
+     */
+    async exportPagesData() {
+        if (this.pages.length === 0) {
+            this.showToast('没有可导出的 Pages', 'warning');
+            return;
+        }
+        
+        const data = {
+            exportDate: new Date().toISOString(),
+            pages: this.pages.map(p => ({
+                name: p.name,
+                subdomain: p.subdomain || p.name,
+                url: `https://${p.subdomain || p.name}.pages.dev`,
+                created_on: p.created_on
+            }))
+        };
+        
+        const filename = this.getExportFilename('pages');
+        await this.downloadJSON(data, filename);
     }
 }
 
