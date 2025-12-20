@@ -466,7 +466,7 @@ body {
 }
 
 .workers-list {
-  max-height: calc(100vh - 350px);
+  max-height: calc(100vh - 260px);
   overflow-y: auto;
 }
 
@@ -580,7 +580,7 @@ body {
 }
 
 .pages-list {
-  max-height: calc(100vh - 350px);
+  max-height: calc(100vh - 260px);
   overflow-y: auto;
 }
 
@@ -1162,7 +1162,7 @@ body {
 
 /* Records List */
 .records-list {
-  max-height: calc(100vh - 350px);
+  max-height: calc(100vh - 260px);
   overflow-y: auto;
 }
 
