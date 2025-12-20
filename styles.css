@@ -2074,8 +2074,55 @@ textarea.text-input {
   color: var(--primary);
 }
 
+/* 通用表单样式 */
+.form-group {
+  margin-bottom: var(--spacing-md);
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-xs);
+}
+
+.text-input,
+input[type="text"],
+input[type="password"],
+textarea {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+  box-sizing: border-box;
+}
+
+.text-input:focus,
+input[type="text"]:focus,
+input[type="password"]:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: var(--bg-card);
+  box-shadow: 0 0 0 3px rgba(246, 130, 31, 0.1);
+}
+
+.text-input::placeholder,
+input[type="text"]::placeholder,
+input[type="password"]::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+}
+
 /* 加大备注内容输入框 */
-.modal-body textarea.text-input {
+.modal-body textarea.text-input,
+.modal-body textarea {
   min-height: 200px;
   resize: vertical;
   font-size: 14px;
@@ -2083,7 +2130,8 @@ textarea.text-input {
 }
 
 /* 加大标签输入框 */
-.modal-body input.text-input {
+.modal-body input.text-input,
+.modal-body input[type="text"] {
   padding: var(--spacing-md);
   font-size: 14px;
 }

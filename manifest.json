@@ -5,7 +5,6 @@
       "16": "icons/icon16.png",
       "48": "icons/icon48.png"
     },
-    "default_popup": "popup.html",
     "default_title": "Cloudflare Manager"
   },
   "background": {
