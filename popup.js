@@ -1230,6 +1230,7 @@ class CloudflareManager {
     }
 
     renderPages() {
+        const list = document.getElementById('pagesList');
         const filteredPages = this.getFilteredPages();
         
         if (filteredPages.length === 0) {
