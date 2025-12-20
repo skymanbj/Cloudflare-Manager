@@ -994,10 +994,8 @@ class CloudflareManager {
             // 加载所有域名
             await this.loadZones();
             
-            // 显示标签页和统计信息
+            // 显示标签页
             tabsSection.style.display = 'block';
-            statsSection.style.display = 'flex';
-            document.getElementById('zoneCount').textContent = `${this.zones.length} 个域名`;
             
             // 填充域名筛选器
             this.renderZoneFilter();
@@ -1597,6 +1595,7 @@ class CloudflareManager {
             document.getElementById('workersCount').textContent = `${this.workers.length} 个 Workers`;
             
             this.renderWorkers();
+            this.updateTabCounts();
             
         } catch (error) {
             workersList.innerHTML = `<div class="empty-state"><p>加载失败: ${this.escapeHtml(error.message)}</p></div>`;
@@ -1704,6 +1703,7 @@ class CloudflareManager {
             document.getElementById('pagesCount').textContent = `${this.pages.length} 个 Pages`;
             
             this.renderPages();
+            this.updateTabCounts();
             
         } catch (error) {
             pagesList.innerHTML = `<div class="empty-state"><p>加载失败: ${this.escapeHtml(error.message)}</p></div>`;
@@ -1969,6 +1969,28 @@ class CloudflareManager {
         if (notesCountEl) {
             notesCountEl.textContent = `${remarksCount} 条备注`;
         }
+        
+        // 更新标签页中的统计数字
+        this.updateTabCounts();
+    }
+    
+    /**
+     * 更新标签页中的统计数字
+     */
+    updateTabCounts() {
+        const tabZoneCount = document.getElementById('tabZoneCount');
+        const tabDnsCount = document.getElementById('tabDnsCount');
+        const tabWorkersCount = document.getElementById('tabWorkersCount');
+        const tabPagesCount = document.getElementById('tabPagesCount');
+        const tabNotesCount = document.getElementById('tabNotesCount');
+        
+        if (tabZoneCount) tabZoneCount.textContent = this.zones.length;
+        if (tabDnsCount) tabDnsCount.textContent = this.allRecords.length;
+        if (tabWorkersCount) tabWorkersCount.textContent = this.workers.length;
+        if (tabPagesCount) tabPagesCount.textContent = this.pages.length;
+        
+        const remarksCount = Object.values(this.remarks).filter(r => r.content).length;
+        if (tabNotesCount) tabNotesCount.textContent = remarksCount;
     }
     
     /**

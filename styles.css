@@ -469,7 +469,7 @@ body {
 }
 
 .workers-list {
-  max-height: calc(100vh - 260px);
+  max-height: calc(100vh - 180px);
   overflow-y: auto;
 }
 
@@ -583,7 +583,7 @@ body {
 }
 
 .pages-list {
-  max-height: calc(100vh - 260px);
+  max-height: calc(100vh - 180px);
   overflow-y: auto;
 }
 
@@ -1165,7 +1165,7 @@ body {
 
 /* Records List */
 .records-list {
-  max-height: calc(100vh - 260px);
+  max-height: calc(100vh - 180px);
   overflow-y: auto;
 }
 
@@ -1452,7 +1452,7 @@ body {
 
 /* 笔记列表容器 */
 .notes-list-container {
-  max-height: calc(100vh - 400px);
+  max-height: calc(100vh - 180px);
   overflow-y: auto;
   padding: var(--spacing-md);
 }
