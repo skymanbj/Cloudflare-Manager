@@ -24,7 +24,8 @@
   "name": "Cloudflare Manager",
   "permissions": [
     "storage",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "downloads"
   ],
   "version": "2.2.0"
 }

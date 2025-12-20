@@ -1024,14 +1024,7 @@ class CloudflareManager {
         
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
         
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `all_dns_records_${new Date().toISOString().slice(0,10)}.csv`;
-        link.click();
-        URL.revokeObjectURL(url);
-        
+        this.downloadCSV(csv, `all_dns_records_${new Date().toISOString().slice(0,10)}.csv`);
         this.showToast(`已导出 ${this.allRecords.length} 条记录`, 'success');
     }
 
@@ -1060,14 +1053,7 @@ class CloudflareManager {
         
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
         
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `workers_${new Date().toISOString().slice(0,10)}.csv`;
-        link.click();
-        URL.revokeObjectURL(url);
-        
+        this.downloadCSV(csv, `workers_${new Date().toISOString().slice(0,10)}.csv`);
         this.showToast(`已导出 ${this.workers.length} 个 Workers`, 'success');
     }
 
@@ -1322,20 +1308,64 @@ class CloudflareManager {
         
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
         
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `pages_${new Date().toISOString().slice(0,10)}.csv`;
-        link.click();
-        URL.revokeObjectURL(url);
-        
+        this.downloadCSV(csv, `pages_${new Date().toISOString().slice(0,10)}.csv`);
         this.showToast(`已导出 ${this.pages.length} 个 Pages`, 'success');
     }
 
     // =====================================================
     // Utility Methods
     // =====================================================
+    
+    /**
+     * 使用 chrome.downloads API 下载 CSV 文件
+     * 在扩展弹出窗口中，<a>.click() 方式不可靠，需要使用 chrome.downloads API
+     */
+    downloadCSV(csvContent, filename) {
+        // 添加 BOM 以确保 Excel 正确识别 UTF-8 编码
+        const BOM = '\uFEFF';
+        const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        
+        chrome.downloads.download({
+            url: url,
+            filename: filename,
+            saveAs: true
+        }, (downloadId) => {
+            // 清理 Object URL
+            setTimeout(() => {
+                URL.revokeObjectURL(url);
+            }, 1000);
+            
+            if (chrome.runtime.lastError) {
+                console.error('下载失败:', chrome.runtime.lastError);
+                this.showToast('下载失败: ' + chrome.runtime.lastError.message, 'error');
+            }
+        });
+    }
+    
+    /**
+     * 使用 chrome.downloads API 下载 JSON 文件
+     */
+    downloadJSON(data, filename) {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        chrome.downloads.download({
+            url: url,
+            filename: filename,
+            saveAs: true
+        }, (downloadId) => {
+            setTimeout(() => {
+                URL.revokeObjectURL(url);
+            }, 1000);
+            
+            if (chrome.runtime.lastError) {
+                console.error('下载失败:', chrome.runtime.lastError);
+                this.showToast('下载失败: ' + chrome.runtime.lastError.message, 'error');
+            }
+        });
+    }
+    
     showLoading() {
         document.getElementById('loadingSection').style.display = 'flex';
     }
@@ -1851,14 +1881,7 @@ class CloudflareManager {
             remarks: remarksArray
         };
         
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `cloudflare-remarks-${new Date().toISOString().slice(0,10)}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        
+        this.downloadJSON(data, `cloudflare-remarks-${new Date().toISOString().slice(0,10)}.json`);
         this.showToast('备注已导出', 'success');
     }
 }
