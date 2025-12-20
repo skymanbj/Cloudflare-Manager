@@ -27,6 +27,16 @@ class CloudflareManager {
         this.remarksSearchQuery = '';
         this.remarksTypeFilter = '';
         
+        // 初始化 
+        // 处理点击外部关闭备注窗口
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.remark-btn')) {
+                document.querySelectorAll('.remark-btn.active').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+            }
+        });
+
         this.init();
     }
 
@@ -630,8 +640,7 @@ class CloudflareManager {
                 `;
                 
                 item.querySelector('[data-action="remark"]').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.openRemarkModal('dns', record.id, record.name, `${record.type} → ${record.content}`);
+                    this.handleRemarkButtonClick(e, 'dns', record.id, record.name, `${record.type} → ${record.content}`);
                 });
                 item.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -1174,8 +1183,8 @@ class CloudflareManager {
                 </div>
             `;
             
-            item.querySelector('[data-action="remark"]').addEventListener('click', () => {
-                this.openRemarkModal('worker', worker.id, worker.id, `创建于 ${createdDate}`);
+            item.querySelector('[data-action="remark"]').addEventListener('click', (e) => {
+                this.handleRemarkButtonClick(e, 'worker', worker.id, worker.id, `创建于 ${createdDate}`);
             });
             
             list.appendChild(item);
@@ -1221,7 +1230,6 @@ class CloudflareManager {
     }
 
     renderPages() {
-        const list = document.getElementById('pagesList');
         const filteredPages = this.getFilteredPages();
         
         if (filteredPages.length === 0) {
@@ -1289,8 +1297,8 @@ class CloudflareManager {
                 </div>
             `;
             
-            item.querySelector('[data-action="remark"]').addEventListener('click', () => {
-                this.openRemarkModal('page', page.name, page.name, pagesUrl);
+            item.querySelector('[data-action="remark"]').addEventListener('click', (e) => {
+                this.handleRemarkButtonClick(e, 'page', page.name, page.name, pagesUrl);
             });
             
             list.appendChild(item);
@@ -1432,9 +1440,8 @@ class CloudflareManager {
         }
         
         // 截取内容预览（最多100字符）
-        const preview = remark.content.length > 100 
-            ? remark.content.substring(0, 100) + '...' 
-            : remark.content;
+        // Tooltip中不再进行 character-based 截断，防止破坏 Markdown 语法
+        const remarkText = remark.content;
         
         // 生成标签HTML
         let tagsHtml = '';
@@ -1446,14 +1453,39 @@ class CloudflareManager {
             `;
         }
         
+        // 渲染 Markdown
+        let renderedContent = '';
+        if (typeof marked !== 'undefined') {
+            try {
+                renderedContent = marked.parse(remarkText);
+            } catch (e) {
+                console.error('Marked parse error:', e);
+                renderedContent = this.escapeHtml(remarkText).replace(/\n/g, '<br>');
+            }
+        } else {
+            // 如果 marked 没加载成功，执行超简易渲染
+            renderedContent = this.escapeHtml(remarkText)
+                .replace(/\n/g, '<br>')
+                .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>')
+                .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:100%">');
+        }
+        
         return `
             <div class="remark-tooltip">
-                <div class="remark-tooltip-content">${this.escapeHtml(preview)}</div>
+                <div class="remark-tooltip-content">${renderedContent}</div>
                 ${tagsHtml}
             </div>
         `;
     }
     
+    /**
+     * 处理备注按钮点击
+     */
+    handleRemarkButtonClick(e, type, id, name, detail) {
+        e.stopPropagation();
+        this.openRemarkModal(type, id, name, detail);
+    }
+
     /**
      * 生成备注按钮HTML
      */
@@ -1462,7 +1494,7 @@ class CloudflareManager {
         const tooltipHtml = hasRemark ? this.getRemarkTooltipHtml(type, id) : '';
         
         return `
-            <button class="remark-btn ${hasRemark ? 'has-remark' : ''}" title="${title}" data-action="remark">
+            <button class="remark-btn ${hasRemark ? 'has-remark' : ''}" ${hasRemark ? '' : `title="${title}"`} data-action="remark">
                 📝
                 ${tooltipHtml}
             </button>
@@ -1710,7 +1742,7 @@ class CloudflareManager {
                         <span class="remark-item-name">${this.escapeHtml(displayName)}</span>
                         <span class="remark-item-date">${dateStr}</span>
                     </div>
-                    <div class="remark-item-content">${this.escapeHtml(remark.content)}</div>
+                    <div class="remark-item-content">${typeof marked !== 'undefined' ? marked.parse(remark.content) : this.escapeHtml(remark.content)}</div>
                     ${tagsHtml}
                     <div class="remark-item-actions">
                         <button class="btn-sm btn-secondary" data-action="edit">编辑</button>

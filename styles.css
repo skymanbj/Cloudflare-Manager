@@ -736,7 +736,12 @@ body {
 }
 
 .zone-group-header.collapsed {
-  opacity: 0.8;
+  background: linear-gradient(135deg, rgba(246, 130, 31, 0.1) 0%, rgba(246, 130, 31, 0.03) 100%);
+  border-left-color: var(--border);
+}
+
+.zone-group-header.collapsed .zone-name {
+  color: var(--text-secondary);
 }
 
 .zone-header-left {
@@ -1775,40 +1780,52 @@ body {
 
 .remark-tooltip {
   position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  width: 250px;
-  max-height: 150px;
+  top: -10px; /* 稍微向上偏移，对齐图标中心 */
+  left: calc(100% + 10px); /* 向右侧弹出 */
+  width: 450px;
+  max-width: 500px;
+  max-height: 500px;
   overflow-y: auto;
-  background: var(--bg-card);
+  background-color: #0b0e14 !important;
+  opacity: 1 !important;
   border: 1px solid var(--primary);
   border-radius: var(--radius-md);
-  padding: var(--spacing-sm) var(--spacing-md);
-  box-shadow: var(--shadow-lg);
-  z-index: 1000;
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(-5px);
-  transition: all 0.2s ease;
-  pointer-events: none;
+  padding: var(--spacing-md);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9);
+  z-index: 10000;
+  display: none;
+  pointer-events: auto;
+  text-align: left;
+  cursor: default;
 }
 
+/* 划过图标或划过提示窗本身都保持显示 */
 .remark-btn.has-remark:hover .remark-tooltip {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
+  display: block;
+}
+
+/* 增加感应桥接：防止鼠标从图标移往右侧提示窗时因为中间的空隙导致消失 */
+.remark-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -20px;
+  width: 20px;
+  height: 100%;
+  background: transparent;
 }
 
 .remark-tooltip::before {
   content: '';
   position: absolute;
-  top: -8px;
-  left: 12px;
-  border-width: 0 8px 8px 8px;
+  top: 15px;
+  left: -8px;
+  border-width: 8px 8px 8px 0;
   border-style: solid;
-  border-color: transparent transparent var(--primary) transparent;
+  border-color: transparent var(--primary) transparent transparent;
 }
 
+/* 预览窗口样式优化 */
 .remark-tooltip-content {
   font-size: 12px;
   color: var(--text-primary);
@@ -2129,11 +2146,70 @@ textarea::placeholder {
   line-height: 1.6;
 }
 
-/* 加大标签输入框 */
-.modal-body input.text-input,
-.modal-body input[type="text"] {
-  padding: var(--spacing-md);
+/* Markdown 渲染样式 */
+.remark-item-content, .remark-tooltip-content {
+  line-height: 1.6;
   font-size: 14px;
+}
+
+.remark-item-content a, .remark-tooltip-content a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.remark-item-content a:hover, .remark-tooltip-content a:hover {
+  color: var(--primary-light);
+}
+
+.remark-item-content img, .remark-tooltip-content img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  margin: var(--spacing-sm) 0;
+  border: 1px solid var(--border);
+}
+
+.remark-item-content code, .remark-tooltip-content code {
+  background: var(--bg-hover);
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.9em;
+  color: #e6edf3;
+}
+
+.remark-item-content pre, .remark-tooltip-content pre {
+  background: var(--bg-hover);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin: var(--spacing-md) 0;
+}
+
+.remark-item-content blockquote, .remark-tooltip-content blockquote {
+  border-left: 4px solid var(--border);
+  padding-left: var(--spacing-md);
+  margin-left: 0;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.remark-item-content p, .remark-tooltip-content p {
+  margin-bottom: var(--spacing-sm);
+}
+
+.remark-item-content p:last-child, .remark-tooltip-content p:last-child {
+  margin-bottom: 0;
+}
+
+.remark-item-content h1, .remark-item-content h2, .remark-item-content h3 {
+  margin: var(--spacing-md) 0 var(--spacing-sm);
+  color: var(--text-primary);
+}
+
+.remark-item-content ul, .remark-item-content ol {
+  padding-left: var(--spacing-lg);
+  margin-bottom: var(--spacing-md);
 }
 
 /* =====================================================
