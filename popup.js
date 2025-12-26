@@ -796,6 +796,13 @@ class CloudflareManager {
 
         // Welcome section
         document.getElementById('welcomeAddAccountBtn').addEventListener('click', () => this.openSidebar());
+        
+        // 点击头部账户名切换到下一个账户
+        const headerAccountName = document.getElementById('headerAccountName');
+        if (headerAccountName) {
+            headerAccountName.addEventListener('click', () => this.switchToNextAccount());
+            headerAccountName.title = "点击切换到下一个账户";
+        }
 
         // Account management (in sidebar)
         document.getElementById('saveAccountBtn').addEventListener('click', () => this.saveAccount());
@@ -1086,6 +1093,17 @@ class CloudflareManager {
     updateUI() {
         this.renderAccountSelector();
         
+        // 更新头部账户名显示
+        const headerAccountName = document.getElementById('headerAccountName');
+        if (headerAccountName) {
+            if (this.currentAccount) {
+                headerAccountName.textContent = this.currentAccount.name;
+                headerAccountName.style.display = 'inline-block';
+            } else {
+                headerAccountName.style.display = 'none';
+            }
+        }
+        
         const tabsSection = document.getElementById('tabsSection');
         const statsSection = document.getElementById('statsSection');
         const welcomeSection = document.getElementById('welcomeSection');
@@ -1134,12 +1152,29 @@ class CloudflareManager {
             this.showLoading();
             
             // 重置状态
+            // 重置所有数据状态
             this.selectedZoneId = '';
             this.searchQuery = '';
             this.workers = [];
+            this.pages = [];
+            this.zones = [];
+            this.allRecords = [];
             this.accountId = null;
+            
+            // 重置搜索框
             document.getElementById('searchInput').value = '';
             document.getElementById('clearSearchBtn').style.display = 'none';
+
+            // 立即清空界面列表，防止残留
+            document.getElementById('recordsList').innerHTML = '';
+            const workersList = document.querySelector('.workers-list');
+            if (workersList) workersList.innerHTML = '';
+            
+            const pagesList = document.querySelector('.pages-list');
+            if (pagesList) pagesList.innerHTML = '';
+            
+            const remarksList = document.getElementById('remarksList');
+            if (remarksList) remarksList.innerHTML = '';
             
             // 加载所有域名
             await this.loadZones();
@@ -1531,9 +1566,37 @@ class CloudflareManager {
             return;
         }
         
+        
         this.currentAccount = this.accounts.find(a => a.id === accountId);
+        
+        // 更新头部账户名显示
+        const headerAccountName = document.getElementById('headerAccountName');
+        if (headerAccountName && this.currentAccount) {
+            headerAccountName.textContent = this.currentAccount.name;
+            headerAccountName.style.display = 'inline-block';
+        }
+        
         await this.saveAccounts();
         await this.loadAllZonesAndRecords();
+    }
+
+    /**
+     * 切换到下一个账户
+     */
+    async switchToNextAccount() {
+        if (!this.accounts || this.accounts.length <= 1) {
+            this.openSidebar(); // 如果只有一个账户或没有账户，打开侧边栏
+            return;
+        }
+
+        const currentIndex = this.accounts.findIndex(a => a.id === this.currentAccount?.id);
+        const nextIndex = (currentIndex + 1) % this.accounts.length;
+        const nextAccount = this.accounts[nextIndex];
+
+        if (nextAccount) {
+            this.showToast(`正在切换到: ${nextAccount.name}...`, 'info');
+            await this.switchAccount(nextAccount.id);
+        }
     }
 
     // =====================================================
