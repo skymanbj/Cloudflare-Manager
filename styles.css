@@ -1831,25 +1831,28 @@ body {
   padding: var(--spacing-md);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9);
   z-index: 10000;
-  display: none;
+  visibility: hidden;
+  opacity: 0;
   pointer-events: auto;
   text-align: left;
   cursor: default;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
 /* 划过图标或划过提示窗本身都保持显示 */
 .remark-btn.has-remark:hover .remark-tooltip {
-  display: block;
+  visibility: visible;
+  opacity: 1;
 }
 
 /* 增加感应桥接：防止鼠标从图标移往右侧提示窗时因为中间的空隙导致消失 */
 .remark-tooltip::after {
   content: '';
   position: absolute;
-  top: 0;
+  top: -20px;
   left: -20px;
-  width: 20px;
-  height: 100%;
+  width: 30px; /* 增加感应范围，完全覆盖 10px 间隙 */
+  height: calc(100% + 40px);
   background: transparent;
 }
 

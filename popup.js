@@ -93,7 +93,14 @@ class GitHubSyncManager {
             }
 
             const data = await response.json();
-            const content = JSON.parse(atob(data.content));
+            // 使用 TextDecoder 处理 UTF-8 字符（避免 Base64 直接解码乱码）
+            const binaryString = atob(data.content);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            const contentText = new TextDecoder('utf-8').decode(bytes);
+            const content = JSON.parse(contentText);
             return { ...content, sha: data.sha };
         } catch (error) {
             console.error('[GitHubSync] Failed to get remote data:', error);
@@ -111,9 +118,18 @@ class GitHubSyncManager {
         const branch = this.config.branch || 'main';
         const url = `https://api.github.com/repos/${owner}/${repo}/contents/${this.SYNC_FILE_PATH}`;
 
+        // 使用符合 UTF-8 标准的方案进行 Base64 编码
+        const jsonStr = JSON.stringify(data, null, 2);
+        const bytes = new TextEncoder().encode(jsonStr);
+        let binaryString = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+            binaryString += String.fromCharCode(bytes[i]);
+        }
+        const base64Content = btoa(binaryString);
+
         const body = {
             message: `Sync remarks - ${new Date().toISOString()}`,
-            content: btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2)))),
+            content: base64Content,
             branch: branch
         };
 

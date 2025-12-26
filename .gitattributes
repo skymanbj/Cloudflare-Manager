@@ -1,0 +1,16 @@
+# Declare the default behavior of all files in the repository
+* text=auto
+
+# Explicitly declare text files that should always use LF/CRLF and UTF-8
+*.html text eol=crlf working-tree-encoding=UTF-8
+*.css text eol=crlf working-tree-encoding=UTF-8
+*.js text eol=crlf working-tree-encoding=UTF-8
+*.json text eol=crlf working-tree-encoding=UTF-8
+*.md text eol=crlf working-tree-encoding=UTF-8
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
