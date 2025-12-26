@@ -404,8 +404,25 @@
                         <!-- 显示目标资源信息 -->
                     </div>
                     <div class="form-group">
-                        <label for="remarkContent">备注内容</label>
-                        <textarea id="remarkContent" class="text-input" rows="5" placeholder="输入备注内容..."></textarea>
+                        <div class="remark-content-header">
+                            <label for="remarkContent">备注内容</label>
+                            <div class="markdown-toolbar" id="markdownToolbar">
+                                <button type="button" class="toolbar-btn" data-action="bold" title="加粗 (Ctrl+B)">B</button>
+                                <button type="button" class="toolbar-btn" data-action="italic" title="斜体 (Ctrl+I)">I</button>
+                                <button type="button" class="toolbar-btn" data-action="list" title="无序列表">-</button>
+                                <button type="button" class="toolbar-btn" data-action="link" title="链接">🔗</button>
+                                <button type="button" class="toolbar-btn" data-action="image-url" title="图片链接">🖼️</button>
+                                <button type="button" class="toolbar-btn" data-action="image-local" title="上传本地图片">📁</button>
+                                <button type="button" class="toolbar-btn" data-action="table" title="插入表格">📊</button>
+                                <div class="toolbar-divider"></div>
+                                <button type="button" class="toolbar-btn" data-action="preview" id="togglePreviewBtn" title="预览">👁️ 预览</button>
+                            </div>
+                        </div>
+                        <div class="remark-editor-wrapper">
+                            <textarea id="remarkContent" class="text-input" rows="8" placeholder="支持 Markdown 语法..."></textarea>
+                            <div id="remarkPreview" class="markdown-body preview-area" style="display: none;"></div>
+                        </div>
+                        <input type="file" id="localImageInput" accept="image/*" style="display: none;">
                     </div>
                     <div class="form-group">
                         <label for="remarkTags">标签（用逗号分隔）</label>
@@ -420,6 +437,9 @@
             </div>
         </div>
     </div>
+
+    <!-- 全局悬浮备注提示框 -->
+    <div id="globalRemarkTooltip" class="remark-tooltip-global"></div>
 
     <script src="marked.min.js"></script>
     <script src="popup.js"></script>

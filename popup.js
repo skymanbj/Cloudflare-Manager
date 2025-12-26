@@ -440,7 +440,7 @@ class CloudflareManager {
         this.selectedZoneId = '';
         this.workersSearchQuery = '';
         this.pagesSearchQuery = '';
-        this.collapsedZones = new Set(); // 存储折叠的域名
+            this.collapsedZones = new Set(); // 存储折叠的域名
         
         // 资源备注相关
         this.remarks = {}; // { 'type:id': { content, tags, updatedAt } }
@@ -448,8 +448,16 @@ class CloudflareManager {
         this.remarksSearchQuery = '';
         this.remarksTypeFilter = '';
         
+        // 全局提示框相关
+        this.tooltipEl = document.getElementById('globalRemarkTooltip');
+        this.tooltipTimer = null;
+        this.initGlobalTooltip();
+        
         // GitHub 同步管理器
         this.githubSync = new GitHubSyncManager(this);
+        
+        // Markdown 编辑器状态
+        this.isPreviewing = false;
         
         // 初始化 
         // 处理点击外部关闭备注窗口
@@ -468,9 +476,114 @@ class CloudflareManager {
         await this.loadAccounts();
         await this.loadRemarks();
         await this.githubSync.loadConfig();
+        this.configMarked();
         this.bindEvents();
         this.bindGithubSyncEvents();
         this.updateUI();
+    }
+
+    /**
+     * 初始化全局提示框事件委托
+     */
+    initGlobalTooltip() {
+        if (!this.tooltipEl) return;
+
+        // 使用事件委托监听所有备注按钮的划入
+        document.body.addEventListener('mouseover', (e) => {
+            const btn = e.target.closest('.remark-btn.has-remark');
+            if (btn) {
+                const type = btn.getAttribute('data-type');
+                const id = btn.getAttribute('data-id');
+                if (type && id) {
+                    this.showGlobalTooltip(btn, type, id);
+                }
+            }
+        });
+
+        document.body.addEventListener('mouseout', (e) => {
+            const btn = e.target.closest('.remark-btn.has-remark');
+            if (btn) {
+                this.hideGlobalTooltip();
+            }
+        });
+
+        // 鼠标进入提示框本身时保持显示
+        this.tooltipEl.addEventListener('mouseenter', () => {
+            if (this.tooltipTimer) {
+                clearTimeout(this.tooltipTimer);
+                this.tooltipTimer = null;
+            }
+        });
+
+        this.tooltipEl.addEventListener('mouseleave', () => {
+            this.hideGlobalTooltip();
+        });
+    }
+
+    /**
+     * 显示全局提示框
+     */
+    showGlobalTooltip(anchorEl, type, id) {
+        if (this.tooltipTimer) {
+            clearTimeout(this.tooltipTimer);
+            this.tooltipTimer = null;
+        }
+
+        const remark = this.getRemark(type, id);
+        if (!remark || !remark.content) return;
+
+        // 渲染内容并填充
+        this.tooltipEl.innerHTML = this.getRemarkTooltipHtml(type, id);
+        
+        // 先设为可见但透明，以计算尺寸
+        this.tooltipEl.style.display = 'block';
+        this.tooltipEl.style.opacity = '0';
+        
+        const rect = anchorEl.getBoundingClientRect();
+        
+        // 强制重绘以获取正确尺寸
+        this.tooltipEl.offsetHeight; 
+        
+        const tooltipWidth = this.tooltipEl.offsetWidth || 350;
+        const tooltipHeight = this.tooltipEl.offsetHeight || 100;
+        
+        // 默认位置：按钮右侧中心对齐
+        let left = rect.right + 12;
+        let top = rect.top + rect.height / 2 - tooltipHeight / 2;
+
+        // 边界检查：右侧溢出则显示在左侧
+        if (left + tooltipWidth > window.innerWidth - 10) {
+            left = rect.left - tooltipWidth - 12;
+        }
+        
+        // 边界检查：上下溢出限制
+        if (top < 10) top = 10;
+        if (top + tooltipHeight > window.innerHeight - 10) {
+            top = window.innerHeight - tooltipHeight - 10;
+        }
+
+        this.tooltipEl.style.left = `${left}px`;
+        this.tooltipEl.style.top = `${top}px`;
+        this.tooltipEl.style.opacity = '1';
+        this.tooltipEl.classList.add('show');
+    }
+
+    /**
+     * 隐藏全局提示框（带延时，方便鼠标移入提示框）
+     */
+    hideGlobalTooltip() {
+        if (this.tooltipTimer) return;
+        
+        this.tooltipTimer = setTimeout(() => {
+            this.tooltipEl.classList.remove('show');
+            setTimeout(() => {
+                if (!this.tooltipEl.classList.contains('show')) {
+                    this.tooltipEl.style.display = 'none';
+                    this.tooltipEl.style.opacity = '0';
+                }
+            }, 200);
+            this.tooltipTimer = null;
+        }, 200);
     }
 
     // =====================================================
@@ -772,6 +885,9 @@ class CloudflareManager {
         if (cancelRemarkBtn) {
             cancelRemarkBtn.addEventListener('click', () => this.closeRemarkModal());
         }
+
+        // Markdown 工具栏绑定
+        this.bindMarkdownToolbarEvents();
     }
 
     // =====================================================
@@ -1752,6 +1868,14 @@ class CloudflareManager {
         
         list.innerHTML = '';
         
+        // 如果有搜索关键词，显示搜索结果统计
+        if (this.workersSearchQuery) {
+            const searchInfo = document.createElement('div');
+            searchInfo.className = 'search-result-info';
+            searchInfo.innerHTML = `找到 <strong>${filteredWorkers.length}</strong> 条匹配的 Workers`;
+            list.appendChild(searchInfo);
+        }
+
         filteredWorkers.forEach(worker => {
             const createdDate = worker.created_on ? new Date(worker.created_on).toLocaleDateString('zh-CN') : '-';
             const modifiedDate = worker.modified_on ? new Date(worker.modified_on).toLocaleDateString('zh-CN') : '-';
@@ -1861,6 +1985,14 @@ class CloudflareManager {
         
         list.innerHTML = '';
         
+        // 如果有搜索关键词，显示搜索结果统计
+        if (this.pagesSearchQuery) {
+            const searchInfo = document.createElement('div');
+            searchInfo.className = 'search-result-info';
+            searchInfo.innerHTML = `找到 <strong>${filteredPages.length}</strong> 条匹配的 Pages`;
+            list.appendChild(searchInfo);
+        }
+
         filteredPages.forEach(page => {
             const createdDate = page.created_on ? new Date(page.created_on).toLocaleDateString('zh-CN') : '-';
             const subdomain = page.subdomain || page.name;
@@ -2143,10 +2275,8 @@ class CloudflareManager {
         }
         
         return `
-            <div class="remark-tooltip">
-                <div class="remark-tooltip-content">${renderedContent}</div>
-                ${tagsHtml}
-            </div>
+            <div class="remark-tooltip-content markdown-body">${renderedContent}</div>
+            ${tagsHtml}
         `;
     }
     
@@ -2163,12 +2293,14 @@ class CloudflareManager {
      */
     getRemarkButtonHtml(type, id, title = '添加备注') {
         const hasRemark = this.hasRemark(type, id);
-        const tooltipHtml = hasRemark ? this.getRemarkTooltipHtml(type, id) : '';
         
         return `
-            <button class="remark-btn ${hasRemark ? 'has-remark' : ''}" ${hasRemark ? '' : `title="${title}"`} data-action="remark">
+            <button class="remark-btn ${hasRemark ? 'has-remark' : ''}" 
+                    ${hasRemark ? '' : `title="${title}"`} 
+                    data-action="remark" 
+                    data-type="${type}" 
+                    data-id="${id}">
                 📝
-                ${tooltipHtml}
             </button>
         `;
     }
@@ -2205,6 +2337,18 @@ class CloudflareManager {
         document.getElementById('deleteRemarkBtn').style.display = 
             existingRemark?.content ? 'inline-block' : 'none';
         
+        // 重置预览状态
+        this.isPreviewing = false;
+        const previewEl = document.getElementById('remarkPreview');
+        const contentEl = document.getElementById('remarkContent');
+        const toggleBtn = document.getElementById('togglePreviewBtn');
+        if (previewEl) previewEl.style.display = 'none';
+        if (contentEl) contentEl.style.display = 'block';
+        if (toggleBtn) {
+            toggleBtn.innerHTML = '👁️ 预览';
+            toggleBtn.classList.remove('active');
+        }
+
         // 显示弹窗
         document.getElementById('remarkModal').style.display = 'flex';
         
@@ -2420,7 +2564,7 @@ class CloudflareManager {
                         <span class="remark-item-name">${this.escapeHtml(displayName)}</span>
                         <span class="remark-item-date">${dateStr}</span>
                     </div>
-                    <div class="remark-item-content">${typeof marked !== 'undefined' ? marked.parse(remark.content) : this.escapeHtml(remark.content)}</div>
+                    <div class="remark-item-content markdown-body">${typeof marked !== 'undefined' ? marked.parse(remark.content) : this.escapeHtml(remark.content)}</div>
                     ${tagsHtml}
                     <div class="remark-item-actions">
                         <button class="btn-sm btn-secondary" data-action="edit">编辑</button>
@@ -2662,6 +2806,186 @@ class CloudflareManager {
         
         const filename = this.getExportFilename('pages');
         await this.downloadJSON(data, filename);
+    }
+
+    /**
+     * 配置 Marked 渲染器
+     */
+    configMarked() {
+        if (typeof marked !== 'undefined' && typeof marked.setOptions === 'function') {
+            marked.setOptions({
+                gfm: true,
+                breaks: true,
+                headerIds: false,
+                mangle: false,
+                sanitize: false // 我们手动处理或依赖 marked 的安全性
+            });
+        }
+    }
+
+    /**
+     * 绑定 Markdown 工具栏事件
+     */
+    bindMarkdownToolbarEvents() {
+        const toolbar = document.getElementById('markdownToolbar');
+        if (!toolbar) return;
+
+        toolbar.addEventListener('click', (e) => {
+            const btn = e.target.closest('.toolbar-btn');
+            if (!btn) return;
+
+            const action = btn.dataset.action;
+            const textarea = document.getElementById('remarkContent');
+
+            if (action === 'preview') {
+                this.toggleMarkdownPreview();
+            } else if (action === 'image-local') {
+                document.getElementById('localImageInput').click();
+            } else {
+                this.handleMarkdownAction(action, textarea);
+            }
+        });
+
+        // 本地图片上传处理
+        const fileInput = document.getElementById('localImageInput');
+        if (fileInput) {
+            fileInput.addEventListener('change', (e) => this.handleLocalImageUpload(e));
+        }
+
+        // 快捷键支持
+        const textarea = document.getElementById('remarkContent');
+        if (textarea) {
+            textarea.addEventListener('keydown', (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                    if (e.key === 'b') {
+                        e.preventDefault();
+                        this.handleMarkdownAction('bold', textarea);
+                    } else if (e.key === 'i') {
+                        e.preventDefault();
+                        this.handleMarkdownAction('italic', textarea);
+                    }
+                }
+            });
+        }
+    }
+
+    /**
+     * 切换 Markdown 预览
+     */
+    toggleMarkdownPreview() {
+        const previewEl = document.getElementById('remarkPreview');
+        const contentEl = document.getElementById('remarkContent');
+        const toggleBtn = document.getElementById('togglePreviewBtn');
+        
+        this.isPreviewing = !this.isPreviewing;
+
+        if (this.isPreviewing) {
+            const content = contentEl.value;
+            previewEl.innerHTML = typeof marked !== 'undefined' ? marked.parse(content) : this.escapeHtml(content).replace(/\n/g, '<br>');
+            previewEl.style.display = 'block';
+            contentEl.style.display = 'none';
+            toggleBtn.innerHTML = '📝 编辑';
+            toggleBtn.classList.add('active');
+        } else {
+            previewEl.style.display = 'none';
+            contentEl.style.display = 'block';
+            toggleBtn.innerHTML = '👁️ 预览';
+            toggleBtn.classList.remove('active');
+            contentEl.focus();
+        }
+    }
+
+    /**
+     * 处理 Markdown 操作
+     */
+    handleMarkdownAction(action, textarea) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const text = textarea.value;
+        const selected = text.substring(start, end);
+        let replacement = '';
+        let cursorOffset = 0;
+
+        switch (action) {
+            case 'bold':
+                replacement = `**${selected || '加粗文本'}**`;
+                cursorOffset = selected ? replacement.length : 2;
+                break;
+            case 'italic':
+                replacement = `*${selected || '斜体文本'}*`;
+                cursorOffset = selected ? replacement.length : 1;
+                break;
+            case 'list':
+                replacement = selected.split('\n').map(line => `- ${line}`).join('\n');
+                if (!selected) replacement = '- 列表项';
+                cursorOffset = replacement.length;
+                break;
+            case 'link':
+                replacement = `[${selected || '链接文字'}](https://)`;
+                cursorOffset = selected ? replacement.length - 1 : 1;
+                break;
+            case 'image-url':
+                replacement = `![${selected || '图片描述'}](https://)`;
+                cursorOffset = selected ? replacement.length - 1 : 2;
+                break;
+            case 'table':
+                replacement = `\n| 标题1 | 标题2 | 标题3 |\n| :--- | :--- | :--- |\n| 内容1 | 内容2 | 内容3 |\n`;
+                cursorOffset = replacement.length;
+                break;
+        }
+
+        textarea.value = text.substring(0, start) + replacement + text.substring(end);
+        textarea.focus();
+        
+        // 设置光标位置
+        const newPos = start + cursorOffset;
+        textarea.setSelectionRange(newPos, newPos);
+        
+        // 如果是预览模式，自动更新预览
+        if (this.isPreviewing) {
+            this.toggleMarkdownPreview(); // 刷新预览（先关再开最简单）
+            this.toggleMarkdownPreview();
+        }
+    }
+
+    /**
+     * 处理本地图片上传
+     */
+    async handleLocalImageUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // 检查文件大小 (限制为 1MB，因为 chrome.storage.local 有限制)
+        if (file.size > 1024 * 1024) {
+            this.showToast('图片太大，请选择 1MB 以内的图片', 'warning');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const dataUrl = event.target.result;
+            const textarea = document.getElementById('remarkContent');
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const text = textarea.value;
+            
+            const replacement = `![图片描述](${dataUrl})`;
+            textarea.value = text.substring(0, start) + replacement + text.substring(end);
+            
+            // 触发 input 事件以可能的自动保存或其他逻辑
+            textarea.dispatchEvent(new Event('input'));
+            
+            if (this.isPreviewing) {
+                this.toggleMarkdownPreview();
+                this.toggleMarkdownPreview();
+            }
+            
+            this.showToast('图片上传成功', 'success');
+        };
+        reader.readAsDataURL(file);
+        
+        // 重置 input 以便下次选择同一张图
+        e.target.value = '';
     }
 }
 

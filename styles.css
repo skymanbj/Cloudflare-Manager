@@ -57,20 +57,33 @@
   box-sizing: border-box;
 }
 
+html {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+}
+
 body {
   font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', sans-serif;
   background: var(--bg-dark);
   color: var(--text-primary);
   font-size: 14px;
   line-height: 1.5;
-  min-height: 100vh;
+  width: 100%;
+  min-height: 100%;
+  min-width: 800px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
 }
 
 .container {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: var(--spacing-lg);
-  min-height: 100vh;
+  width: 100%;
+  min-height: 100%;
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
 }
 
 /* Scrollbar */
@@ -468,9 +481,13 @@ body {
   overflow: hidden;
 }
 
+
 .workers-list {
-  max-height: calc(100vh - 180px);
-  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  /* 移除内部滚动，允许随页面滚动 */
+  overflow: visible; 
+  padding-bottom: 60px;
 }
 
 .worker-item {
@@ -583,8 +600,20 @@ body {
 }
 
 .pages-list {
-  max-height: calc(100vh - 180px);
-  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  /* 移除内部滚动，允许随页面滚动 */
+  overflow: visible;
+  padding-bottom: 60px;
+}
+
+/* 添加笔记列表样式 */
+.notes-list-container {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  overflow: visible;
+  padding-bottom: 60px;
 }
 
 .page-item {
@@ -1165,8 +1194,10 @@ body {
 
 /* Records List */
 .records-list {
-  max-height: calc(100vh - 180px);
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
+  padding-bottom: 50px;
 }
 
 .record-item {
@@ -1384,6 +1415,17 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--spacing-md);
+}
+
+.dns-section, .workers-section, .pages-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--spacing-md);
 }
 
 /* 笔记标题栏合并样式 */
@@ -1452,9 +1494,11 @@ body {
 
 /* 笔记列表容器 */
 .notes-list-container {
-  max-height: calc(100vh - 180px);
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
   padding: var(--spacing-md);
+  padding-bottom: 60px;
 }
 
 /* 笔记卡片 */
@@ -1816,45 +1860,64 @@ body {
   position: relative;
 }
 
-.remark-tooltip {
-  position: absolute;
-  top: -10px; /* 稍微向上偏移，对齐图标中心 */
-  left: calc(100% + 10px); /* 向右侧弹出 */
-  width: 450px;
-  max-width: 500px;
+.remark-tooltip-global {
+  position: fixed;
+  width: 525px;
+  max-width: 570px;
   max-height: 500px;
   overflow-y: auto;
   background-color: #0b0e14 !important;
-  opacity: 1 !important;
   border: 1px solid var(--primary);
   border-radius: var(--radius-md);
   padding: var(--spacing-md);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9);
-  z-index: 10000;
-  visibility: hidden;
-  opacity: 0;
+  z-index: 100000;
   pointer-events: auto;
   text-align: left;
   cursor: default;
-  transition: opacity 0.2s ease, visibility 0.2s ease;
+  transition: opacity 0.2s ease;
+  word-break: break-all;
+  white-space: normal;
+  display: none;
+  opacity: 0;
 }
 
-/* 划过图标或划过提示窗本身都保持显示 */
-.remark-btn.has-remark:hover .remark-tooltip {
-  visibility: visible;
+.remark-tooltip-global.show {
+  display: block;
   opacity: 1;
 }
 
-/* 增加感应桥接：防止鼠标从图标移往右侧提示窗时因为中间的空隙导致消失 */
-.remark-tooltip::after {
-  content: '';
-  position: absolute;
-  top: -20px;
-  left: -20px;
-  width: 30px; /* 增加感应范围，完全覆盖 10px 间隙 */
-  height: calc(100% + 40px);
-  background: transparent;
+.remark-tooltip-global img {
+  max-width: 100%;
+  max-height: 250px;
+  border-radius: var(--radius-sm);
+  margin: var(--spacing-xs) 0;
+  display: block;
 }
+
+.remark-tooltip-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.remark-tooltip-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--border);
+}
+
+.remark-tooltip-tag {
+  font-size: 11px;
+  background: rgba(246, 130, 31, 0.15);
+  color: var(--primary);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
 
 .remark-tooltip::before {
   content: '';
@@ -2365,6 +2428,192 @@ textarea::placeholder {
 .btn-large:hover {
   box-shadow: var(--shadow-lg);
   transform: translateY(-2px);
+}
+
+/* =====================================================
+   Markdown Editor & Toolbar - Markdown 编辑器与工具栏
+   ===================================================== */
+.remark-content-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-xs);
+}
+
+.markdown-toolbar {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-hover);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.toolbar-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.toolbar-btn:hover {
+  background: var(--bg-input);
+  color: var(--primary);
+}
+
+.toolbar-btn.active {
+  background: var(--primary);
+  color: white;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
+  align-self: center;
+}
+
+#togglePreviewBtn {
+  width: auto;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.remark-editor-wrapper {
+  position: relative;
+  min-height: 200px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.remark-editor-wrapper textarea {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  height: 100%;
+}
+
+.preview-area {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-card);
+  padding: var(--spacing-md);
+  box-sizing: border-box;
+  overflow-y: auto;
+  z-index: 5;
+}
+
+/* Markdown Content Styling - Markdown 内容通用样式 */
+.markdown-body {
+  line-height: 1.6;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3, 
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.markdown-body h1 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.markdown-body h2 { font-size: 1.25em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.markdown-body h3 { font-size: 1.1em; }
+
+.markdown-body p, .markdown-body ul, .markdown-body ol, .markdown-body dl, .markdown-body blockquote, .markdown-body table {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.markdown-body blockquote {
+  padding: 0 1em;
+  color: var(--text-muted);
+  border-left: 0.25em solid var(--border);
+}
+
+.markdown-body code {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 85%;
+  background-color: var(--bg-hover);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+}
+
+.markdown-body pre {
+  padding: 16px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.45;
+  background-color: var(--bg-hover);
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.markdown-body pre code {
+  padding: 0;
+  background-color: transparent;
+}
+
+/* Tables Support - 表格支持 */
+.markdown-body table {
+  display: block;
+  width: 100%;
+  width: max-content;
+  max-width: 100%;
+  overflow: auto;
+  border-spacing: 0;
+  border-collapse: collapse;
+}
+
+.markdown-body table th {
+  font-weight: 600;
+}
+
+.markdown-body table th, .markdown-body table td {
+  padding: 6px 13px;
+  border: 1px solid var(--border);
+}
+
+.markdown-body table tr {
+  background-color: var(--bg-card);
+  border-top: 1px solid var(--border);
+}
+
+.markdown-body table tr:nth-child(2n) {
+  background-color: var(--bg-hover);
+}
+
+.markdown-body img {
+  max-width: 100%;
+  box-sizing: content-box;
+  background-color: var(--bg-card);
+  border-radius: var(--radius-sm);
+}
+
+/* Global Tooltip Adjustments */
+.remark-tooltip-global .markdown-body {
+  font-size: 13px;
+}
+
+.remark-tooltip-global .markdown-body table {
+  font-size: 12px;
 }
 
 /* =====================================================

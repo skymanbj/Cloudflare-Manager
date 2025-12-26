@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloudflare Manager</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header class="header">
+            <div class="logo">
+                <button id="menuBtn" class="menu-btn" title="菜单">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M3 12h18M3 6h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+                <h1>Cloudflare Manager</h1>
+            </div>
+            <div class="header-actions">
+                <button id="exportBtn" class="icon-btn" title="导出数据">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <button id="refreshBtn" class="icon-btn" title="刷新">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- 侧边栏菜单 -->
+        <div id="sidebarOverlay" class="sidebar-overlay"></div>
+        <aside id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <h2>账户管理</h2>
+                <button id="closeSidebar" class="btn-text">×</button>
+            </div>
+            <div class="sidebar-body">
+                <!-- 当前账户 -->
+                <div class="sidebar-section">
+                    <h3>当前账户</h3>
+                    <select id="accountSelect" class="select-input sidebar-select">
+                        <option value="">请选择账户</option>
+                    </select>
+                </div>
+                
+                <!-- 添加/编辑账户 -->
+                <div class="sidebar-section">
+                    <h3>添加账户</h3>
+                    <div class="form-group">
+                        <label for="accountName">账户名称</label>
+                        <input type="text" id="accountName" class="text-input" placeholder="例如: 生产环境账户">
+                    </div>
+                    <div class="form-group">
+                        <label for="apiToken">API Token</label>
+                        <input type="password" id="apiToken" class="text-input" placeholder="输入 Cloudflare API Token">
+                        <small class="help-text">获取: Cloudflare → My Profile → API Tokens</small>
+                    </div>
+                    <div class="form-actions">
+                        <button id="saveAccountBtn" class="btn-primary btn-block">保存账户</button>
+                        <button id="deleteAccountBtn" class="btn-danger btn-block" style="display: none;">删除账户</button>
+                    </div>
+                </div>
+                
+                <!-- 已保存账户列表 -->
+                <div class="sidebar-section">
+                    <h3>已保存账户</h3>
+                    <div id="accountList" class="account-list"></div>
+                </div>
+                
+                <!-- GitHub 同步设置 -->
+                <div class="sidebar-section">
+                    <h3>📦 GitHub 同步</h3>
+                    <div class="sync-status" id="syncStatus">
+                        <span class="sync-status-icon">⚪</span>
+                        <span class="sync-status-text">未配置</span>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="enableGithubSync">
+                            <span>启用 GitHub 同步</span>
+                        </label>
+                    </div>
+                    <div id="githubSyncSettings" style="display: none;">
+                        <div class="form-group">
+                            <label for="githubToken">GitHub Token</label>
+                            <input type="password" id="githubToken" class="text-input" placeholder="ghp_xxx...">
+                            <small class="help-text">需要 repo 权限</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="githubRepo">仓库名称</label>
+                            <input type="text" id="githubRepo" class="text-input" placeholder="username/repo">
+                        </div>
+                        <div class="form-group">
+                            <label for="githubBranch">分支</label>
+                            <input type="text" id="githubBranch" class="text-input" value="main">
+                        </div>
+                        
+                        <!-- 定时同步设置 -->
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="enableTimerSync">
+                                <span>启用定时同步</span>
+                            </label>
+                        </div>
+                        <div class="form-group" id="syncIntervalGroup" style="display: none;">
+                            <label for="syncInterval">同步间隔</label>
+                            <select id="syncInterval" class="select-input">
+                                <option value="5">每 5 分钟</option>
+                                <option value="15">每 15 分钟</option>
+                                <option value="30" selected>每 30 分钟</option>
+                                <option value="60">每 1 小时</option>
+                            </select>
+                        </div>
+                        <div class="sync-last-time" id="lastSyncTime">上次同步: 从未</div>
+                        
+                        <div class="form-actions sync-actions">
+                            <button id="saveGithubConfigBtn" class="btn-primary btn-block">💾 保存配置</button>
+                            <button id="syncNowBtn" class="btn-secondary btn-block">🔄 立即同步</button>
+                            <button id="pullFromGithubBtn" class="btn-secondary btn-sm">⬇️ 拉取</button>
+                            <button id="pushToGithubBtn" class="btn-secondary btn-sm">⬆️ 推送</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 欢迎界面（无账户时显示） -->
+        <div id="welcomeSection" class="welcome-section" style="display: none;">
+            <div class="welcome-content">
+                <div class="welcome-icon">
+                    <svg width="80" height="80" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <h2 class="welcome-title">欢迎使用 Cloudflare Manager</h2>
+                <p class="welcome-description">开始之前，请先添加您的 Cloudflare 账户</p>
+                <div class="welcome-steps">
+                    <div class="welcome-step">
+                        <span class="step-number">1</span>
+                        <div class="step-content">
+                            <h4>获取 API Token</h4>
+                            <p>登录 Cloudflare → My Profile → API Tokens → Create Token</p>
+                        </div>
+                    </div>
+                    <div class="welcome-step">
+                        <span class="step-number">2</span>
+                        <div class="step-content">
+                            <h4>配置权限</h4>
+                            <p>Zone - Zone:Read, Zone - DNS:Edit</p>
+                        </div>
+                    </div>
+                    <div class="welcome-step">
+                        <span class="step-number">3</span>
+                        <div class="step-content">
+                            <h4>添加账户</h4>
+                            <p>点击下方按钮，填写账户信息</p>
+                        </div>
+                    </div>
+                </div>
+                <button id="welcomeAddAccountBtn" class="btn-primary btn-large">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+                        <path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    添加 Cloudflare 账户
+                </button>
+            </div>
+        </div>
+
+        <!-- 统计信息 (已隐藏，数据整合到标签页) -->
+        <div id="statsSection" class="stats-section" style="display: none !important;">
+            <div class="stat-card">
+                <span class="stat-icon">🌐</span>
+                <span id="zoneCount" class="stat-value">0 个域名</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-icon">📋</span>
+                <span id="recordCount" class="stat-value">0 条记录</span>
+            </div>
+            <div class="stat-card" id="workersStatCard" style="display: none;">
+                <span class="stat-icon">⚡</span>
+                <span id="workersCount" class="stat-value">0 个 Workers</span>
+            </div>
+            <div class="stat-card" id="pagesStatCard" style="display: none;">
+                <span class="stat-icon">📄</span>
+                <span id="pagesCount" class="stat-value">0 个 Pages</span>
+            </div>
+            <div class="stat-card" id="notesStatCard" style="display: none;">
+                <span class="stat-icon">📝</span>
+                <span id="notesCount" class="stat-value">0 条笔记</span>
+            </div>
+        </div>
+
+        <!-- 标签页切换 -->
+        <div id="tabsSection" class="tabs-section" style="display: none;">
+            <div class="tabs">
+                <button class="tab active" data-tab="dns">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    域名和DNS (<span id="tabZoneCount">0</span>/<span id="tabDnsCount">0</span>)
+                </button>
+                <button class="tab" data-tab="workers">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    Workers (<span id="tabWorkersCount">0</span>)
+                </button>
+                <button class="tab" data-tab="pages">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    Pages (<span id="tabPagesCount">0</span>)
+                </button>
+                <button class="tab" data-tab="notes">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    笔记 (<span id="tabNotesCount">0</span>)
+                </button>
+            </div>
+        </div>
+
+        <!-- DNS 记录区域 -->
+        <div id="dnsSection" class="dns-section" style="display: none;">
+            <div class="dns-header">
+                <h2>所有 DNS 记录</h2>
+                <div class="dns-header-actions">
+                    <button id="toggleAllBtn" class="btn-secondary btn-sm" title="展开/折叠全部">
+                        <span id="toggleAllIcon">▼</span> 全部展开
+                    </button>
+                    <div class="filter-box">
+                        <label for="zoneFilter">域名:</label>
+                        <select id="zoneFilter" class="filter-select">
+                            <option value="">全部域名</option>
+                        </select>
+                    </div>
+                    <div class="search-box">
+                        <input type="text" id="searchInput" class="search-input" placeholder="搜索记录...">
+                        <button id="clearSearchBtn" class="clear-search-btn" style="display: none;">×</button>
+                    </div>
+                    <button id="exportDnsBtn" class="btn-secondary btn-sm" title="导出DNS记录">📤 导出</button>
+                    <button id="addRecordBtn" class="btn-primary">+ 添加记录</button>
+                </div>
+            </div>
+
+            <!-- DNS 记录表单 -->
+            <div id="recordForm" class="record-form" style="display: none;">
+                <div class="form-group">
+                    <label for="recordZone">域名</label>
+                    <select id="recordZone" class="select-input"></select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="recordType">类型</label>
+                        <select id="recordType" class="select-input">
+                            <option value="A">A</option>
+                            <option value="AAAA">AAAA</option>
+                            <option value="CNAME">CNAME</option>
+                            <option value="MX">MX</option>
+                            <option value="TXT">TXT</option>
+                            <option value="SRV">SRV</option>
+                            <option value="NS">NS</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="recordName">名称</label>
+                        <input type="text" id="recordName" class="text-input" placeholder="例如: www 或 @">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="recordContent">内容</label>
+                    <input type="text" id="recordContent" class="text-input" placeholder="例如: 192.168.1.1">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="recordTTL">TTL</label>
+                        <select id="recordTTL" class="select-input">
+                            <option value="1">自动</option>
+                            <option value="120">2 分钟</option>
+                            <option value="300">5 分钟</option>
+                            <option value="600">10 分钟</option>
+                            <option value="3600">1 小时</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="recordProxied">
+                            <span>启用代理 (橙云)</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button id="saveRecordBtn" class="btn-primary">保存记录</button>
+                    <button id="cancelRecordBtn" class="btn-secondary">取消</button>
+                </div>
+            </div>
+
+            <!-- DNS 记录列表 -->
+            <div id="recordsList" class="records-list">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+
+        <!-- Workers 区域 -->
+        <div id="workersSection" class="workers-section" style="display: none;">
+            <div class="dns-header">
+                <h2>Workers 项目</h2>
+                <div class="dns-header-actions">
+                    <div class="search-box">
+                        <input type="text" id="workersSearchInput" class="search-input" placeholder="搜索 Workers...">
+                    </div>
+                    <button id="exportWorkersBtn" class="btn-secondary btn-sm" title="导出Workers">📤 导出</button>
+                </div>
+            </div>
+            <div id="workersList" class="workers-list">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+
+        <!-- Pages 区域 -->
+        <div id="pagesSection" class="pages-section" style="display: none;">
+            <div class="dns-header">
+                <h2>Pages 项目</h2>
+                <div class="dns-header-actions">
+                    <div class="search-box">
+                        <input type="text" id="pagesSearchInput" class="search-input" placeholder="搜索 Pages...">
+                    </div>
+                    <button id="exportPagesBtn" class="btn-secondary btn-sm" title="导出Pages">📤 导出</button>
+                </div>
+            </div>
+            <div id="pagesList" class="pages-list">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+
+        <!-- 笔记/备注区域 -->
+        <div id="notesSection" class="notes-section-main" style="display: none;">
+            <div class="dns-header notes-header-combined">
+                <div class="notes-header-left">
+                    <h2>📝 资源备注</h2>
+                    <div class="notes-stats-inline">
+                        <span class="notes-stat-inline"><span id="zoneRemarksCount">0</span> 域名</span>
+                        <span class="notes-stat-inline"><span id="dnsRemarksCount">0</span> DNS</span>
+                        <span class="notes-stat-inline"><span id="workerRemarksCount">0</span> Workers</span>
+                        <span class="notes-stat-inline"><span id="pageRemarksCount">0</span> Pages</span>
+                    </div>
+                </div>
+                <div class="dns-header-actions">
+                    <div class="search-box">
+                        <input type="text" id="remarksSearchInput" class="search-input" placeholder="搜索备注...">
+                    </div>
+                    <select id="remarksTypeFilter" class="filter-select">
+                        <option value="">所有类型</option>
+                        <option value="zone">域名</option>
+                        <option value="dns">DNS记录</option>
+                        <option value="worker">Workers</option>
+                        <option value="page">Pages</option>
+                    </select>
+                    <button id="exportRemarksBtn" class="btn-secondary btn-sm" title="导出备注">
+                        📤 导出
+                    </button>
+                </div>
+            </div>
+
+            <!-- 备注列表 -->
+            <div id="remarksList" class="notes-list-container">
+                <div class="loading">加载中...</div>
+            </div>
+
+            <!-- 空状态 -->
+            <div id="remarksEmptyState" class="notes-empty-state" style="display: none;">
+                <div class="empty-icon">📝</div>
+                <h3>还没有备注</h3>
+                <p>在 DNS、Workers、Pages 标签页中点击 📝 按钮添加备注</p>
+            </div>
+        </div>
+
+        <!-- 加载状态 -->
+        <div id="loadingSection" class="loading-section" style="display: none;">
+            <div class="spinner"></div>
+            <p>加载中...</p>
+        </div>
+
+        <!-- 消息提示 -->
+        <div id="toast" class="toast"></div>
+
+        <!-- 备注编辑弹窗 -->
+        <div id="remarkModal" class="modal" style="display: none;">
+            <div class="modal-overlay"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="remarkModalTitle">添加备注</h3>
+                    <button id="closeRemarkModal" class="btn-text">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="remark-target-info" id="remarkTargetInfo">
+                        <!-- 显示目标资源信息 -->
+                    </div>
+                    <div class="form-group">
+                        <label for="remarkContent">备注内容</label>
+                        <textarea id="remarkContent" class="text-input" rows="5" placeholder="输入备注内容..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="remarkTags">标签（用逗号分隔）</label>
+                        <input type="text" id="remarkTags" class="text-input" placeholder="例如: 生产环境, API, 重要">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="saveRemarkBtn" class="btn-primary">💾 保存备注</button>
+                    <button id="deleteRemarkBtn" class="btn-danger" style="display: none;">🗑️ 删除备注</button>
+                    <button id="cancelRemarkBtn" class="btn-secondary">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="marked.min.js"></script>
+    <script src="popup.js"></script>
+</body>
+</html>
