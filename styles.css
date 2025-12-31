@@ -2720,3 +2720,74 @@ textarea::placeholder {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* =====================================================
+   Account Tags - 账户标签
+   ===================================================== */
+.account-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: var(--spacing-sm);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+/* Account Colors - High Contrast */
+.account-color-0 {
+  background: rgba(33, 150, 243, 0.25);
+  color: #64B5F6;
+  border-color: rgba(33, 150, 243, 0.5);
+}
+
+.account-color-1 {
+  background: rgba(76, 175, 80, 0.25);
+  color: #81C784;
+  border-color: rgba(76, 175, 80, 0.5);
+}
+
+.account-color-2 {
+  background: rgba(255, 152, 0, 0.25);
+  color: #FFB74D;
+  border-color: rgba(255, 152, 0, 0.5);
+}
+
+.account-color-3 {
+  background: rgba(233, 30, 99, 0.25);
+  color: #F06292;
+  border-color: rgba(233, 30, 99, 0.5);
+}
+
+.account-color-4 {
+  background: rgba(156, 39, 176, 0.25);
+  color: #BA68C8;
+  border-color: rgba(156, 39, 176, 0.5);
+}
+
+.account-color-5 {
+  background: rgba(0, 188, 212, 0.25);
+  color: #4DD0E1;
+  border-color: rgba(0, 188, 212, 0.5);
+}
+
+/* Default fallback */
+.account-color-default {
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+
+/* 在域名头部显示时微调 */
+.zone-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+}
+
+.zone-name {
+    margin-right: 4px;
+}

@@ -448,6 +448,10 @@ class CloudflareManager {
         this.remarksSearchQuery = '';
         this.remarksTypeFilter = '';
         
+        // 账户颜色映射
+        this.accountColorMap = new Map();
+        this.nextColorIndex = 0;
+        
         // 全局提示框相关
         this.tooltipEl = document.getElementById('globalRemarkTooltip');
         this.tooltipTimer = null;
@@ -682,7 +686,9 @@ class CloudflareManager {
                 const recordsWithZone = records.map(record => ({
                     ...record,
                     zoneName: zone.name,
-                    zoneId: zone.id
+                    zoneId: zone.id,
+                    accountName: zone.account?.name || 'Unknown',
+                    accountId: zone.account?.id || 'unknown'
                 }));
                 this.allRecords.push(...recordsWithZone);
             } catch (error) {
@@ -1208,6 +1214,21 @@ class CloudflareManager {
         }
     }
 
+    // 获取账户颜色类名
+    getAccountColorClass(accountId) {
+        if (!accountId) return 'account-color-default';
+        
+        if (!this.accountColorMap.has(accountId)) {
+            // 分配下一个可用颜色
+            const colorIndex = this.nextColorIndex % 6; // 6种预定义颜色
+            this.accountColorMap.set(accountId, colorIndex);
+            this.nextColorIndex++;
+        }
+        
+        const index = this.accountColorMap.get(accountId);
+        return `account-color-${index}`;
+    }
+
     // 渲染所有记录，按域名分组
     renderAllRecords() {
         const list = document.getElementById('recordsList');
@@ -1265,8 +1286,18 @@ class CloudflareManager {
             const groupContainer = document.createElement('div');
             groupContainer.className = 'zone-group';
             
-            // 获取 zoneId
-            const zoneId = records[0]?.zoneId || zoneName;
+            // 获取 zoneId 和账户信息
+            const firstRecord = records[0];
+            const zoneId = firstRecord?.zoneId || zoneName;
+            const accountName = firstRecord?.accountName || '';
+            const accountId = firstRecord?.accountId || '';
+            
+            // 生成账户标签 HTML
+            let accountTagHtml = '';
+            if (accountName) {
+                const colorClass = this.getAccountColorClass(accountId);
+                accountTagHtml = `<span class="account-tag ${colorClass}" title="所属账户: ${this.escapeHtml(accountName)}">${this.escapeHtml(accountName)}</span>`;
+            }
             
             // 域名分组标题（可点击折叠）
             const groupHeader = document.createElement('div');
@@ -1276,6 +1307,7 @@ class CloudflareManager {
                 <div class="zone-header-left">
                     <span class="zone-toggle">${isCollapsed ? '▶' : '▼'}</span>
                     <span class="zone-name">${this.escapeHtml(zoneName)}</span>
+                    ${accountTagHtml}
                     ${zoneRemarkBtn}
                 </div>
                 <span class="zone-record-count">${records.length} 条记录</span>
