@@ -671,7 +671,27 @@ class CloudflareManager {
     }
 
     async loadZones() {
-        this.zones = await this.apiRequest('/zones');
+        this.zones = [];
+        let page = 1;
+        const perPage = 50;
+        
+        while (true) {
+            try {
+                // Cloudflare pagination is 1-based
+                const response = await this.apiRequest(`/zones?per_page=${perPage}&page=${page}`);
+                const zones = response || [];
+                
+                this.zones.push(...zones);
+                
+                if (zones.length < perPage) {
+                    break;
+                }
+                page++;
+            } catch (error) {
+                console.error('Failed to load zones page', page, error);
+                break;
+            }
+        }
         return this.zones;
     }
 
@@ -753,10 +773,99 @@ class CloudflareManager {
     }
 
     async loadWorkers() {
-        const accountId = await this.getAccountId();
-        const response = await this.apiRequest(`/accounts/${accountId}/workers/scripts`);
-        this.workers = response || [];
-        return this.workers;
+        this.workers = [];
+        // Case-insensitive check and trim
+        const currentName = (this.currentAccount.name || '').toLowerCase().trim();
+        const isSuperAdmin = currentName === 'liubohn69@gmail.com';
+        
+        try {
+            if (isSuperAdmin) {
+                // Collect accounts from multiple sources to be robust
+                const uniqueAccounts = new Map();
+
+                // 1. Current Account
+                const currentId = await this.getAccountId();
+                if (currentId) {
+                    uniqueAccounts.set(currentId, { id: currentId, name: this.currentAccount.name });
+                }
+
+                // 2. From /accounts API
+                try {
+                    const apiAccounts = await this.apiRequest('/accounts?per_page=50');
+                    if (Array.isArray(apiAccounts)) {
+                        apiAccounts.forEach(acc => {
+                            uniqueAccounts.set(acc.id, { id: acc.id, name: acc.name });
+                        });
+                    }
+                } catch (e) {
+                    console.warn('Failed to fetch /accounts for workers:', e);
+                }
+
+                // 3. From Zones (Discovery via domains)
+                if (this.zones && this.zones.length > 0) {
+                    this.zones.forEach(z => {
+                        if (z.account && z.account.id) {
+                            if (!uniqueAccounts.has(z.account.id)) {
+                                uniqueAccounts.set(z.account.id, { 
+                                    id: z.account.id, 
+                                    name: z.account.name 
+                                });
+                            }
+                        }
+                    });
+                }
+                
+                const allAccounts = Array.from(uniqueAccounts.values());
+                console.log(`Scanning ${allAccounts.length} accounts for Workers`);
+
+                // Parallel fetch
+                const promises = allAccounts.map(async account => {
+                    try {
+                        const response = await this.apiRequest(`/accounts/${account.id}/workers/scripts`);
+                        return (response || []).map(worker => ({
+                            ...worker,
+                            account: {
+                                id: account.id,
+                                name: account.name
+                            }
+                        }));
+                    } catch (err) {
+                        console.warn(`Failed to fetch workers for account ${account.name} (${account.id}):`, err);
+                        return [];
+                    }
+                });
+                
+                const results = await Promise.all(promises);
+                this.workers = results.flat();
+                
+            } else {
+                // Standard fetch
+                const accountId = await this.getAccountId();
+                const response = await this.apiRequest(`/accounts/${accountId}/workers/scripts`);
+                this.workers = (response || []).map(worker => ({
+                    ...worker,
+                    account: {
+                        id: accountId,
+                        name: this.currentAccount ? this.currentAccount.name : 'Unknown'
+                    }
+                }));
+            }
+            
+            // Sort: Account Name -> Worker ID
+            this.workers.sort((a, b) => {
+                const accountA = a.account?.name || '';
+                const accountB = b.account?.name || '';
+                if (accountA !== accountB) {
+                    return accountA.localeCompare(accountB);
+                }
+                return a.id.localeCompare(b.id);
+            });
+            
+            return this.workers;
+        } catch (error) {
+            console.error('loadWorkers error:', error);
+            throw error;
+        }
     }
 
     async getWorkerRoutes(scriptName) {
@@ -781,10 +890,99 @@ class CloudflareManager {
 
     // Pages API Methods
     async loadPages() {
-        const accountId = await this.getAccountId();
-        const response = await this.apiRequest(`/accounts/${accountId}/pages/projects`);
-        this.pages = response || [];
-        return this.pages;
+        this.pages = [];
+        // Case-insensitive check and trim
+        const currentName = (this.currentAccount.name || '').toLowerCase().trim();
+        const isSuperAdmin = currentName === 'liubohn69@gmail.com';
+        
+        try {
+            if (isSuperAdmin) {
+                // Collect accounts from multiple sources
+                const uniqueAccounts = new Map();
+
+                // 1. Current Account
+                const currentId = await this.getAccountId();
+                if (currentId) {
+                    uniqueAccounts.set(currentId, { id: currentId, name: this.currentAccount.name });
+                }
+
+                // 2. From /accounts API
+                try {
+                    const apiAccounts = await this.apiRequest('/accounts?per_page=50');
+                    if (Array.isArray(apiAccounts)) {
+                        apiAccounts.forEach(acc => {
+                            uniqueAccounts.set(acc.id, { id: acc.id, name: acc.name });
+                        });
+                    }
+                } catch (e) {
+                    console.warn('Failed to fetch /accounts for pages:', e);
+                }
+
+                // 3. From Zones
+                if (this.zones && this.zones.length > 0) {
+                    this.zones.forEach(z => {
+                        if (z.account && z.account.id) {
+                            if (!uniqueAccounts.has(z.account.id)) {
+                                uniqueAccounts.set(z.account.id, { 
+                                    id: z.account.id, 
+                                    name: z.account.name 
+                                });
+                            }
+                        }
+                    });
+                }
+
+                const allAccounts = Array.from(uniqueAccounts.values());
+                console.log(`Scanning ${allAccounts.length} accounts for Pages`);
+                
+                // Parallel fetch
+                const promises = allAccounts.map(async account => {
+                    try {
+                        const response = await this.apiRequest(`/accounts/${account.id}/pages/projects`);
+                        return (response || []).map(page => ({
+                            ...page,
+                            account: {
+                                id: account.id,
+                                name: account.name
+                            }
+                        }));
+                    } catch (err) {
+                        console.warn(`Failed to fetch pages for account ${account.name} (${account.id}):`, err);
+                        return [];
+                    }
+                });
+                
+                const results = await Promise.all(promises);
+                this.pages = results.flat();
+                
+            } else {
+                // Standard fetch
+                const accountId = await this.getAccountId();
+                const response = await this.apiRequest(`/accounts/${accountId}/pages/projects`);
+                this.pages = (response || []).map(page => ({
+                    ...page,
+                    account: {
+                        id: accountId,
+                        name: this.currentAccount ? this.currentAccount.name : 'Unknown'
+                    }
+                }));
+            }
+
+            // Sort: Account Name -> Page Name
+            this.pages.sort((a, b) => {
+                const accountA = a.account?.name || '';
+                const accountB = b.account?.name || '';
+                if (accountA !== accountB) {
+                    return accountA.localeCompare(accountB);
+                }
+                return a.name.localeCompare(b.name);
+            });
+
+            return this.pages;
+        } catch (error) {
+            console.error('loadPages error:', error);
+            throw error;
+        }
     }
 
     // =====================================================
@@ -2025,6 +2223,7 @@ class CloudflareManager {
                 <div class="worker-info">
                     <div class="worker-name-row">
                         <span class="worker-name">${this.escapeHtml(worker.id)}</span>
+                        ${worker.account ? `<span class="account-tag ${this.getAccountColorClass(worker.account.id)}">${this.escapeHtml(worker.account.name)}</span>` : ''}
                         ${this.getRemarkButtonHtml('worker', worker.id, '添加备注')}
                     </div>
                     <div class="worker-meta">
@@ -2146,6 +2345,7 @@ class CloudflareManager {
                 <div class="page-info">
                     <div class="page-name-row">
                         <span class="page-name">${this.escapeHtml(page.name)}</span>
+                        ${page.account ? `<span class="account-tag ${this.getAccountColorClass(page.account.id)}">${this.escapeHtml(page.account.name)}</span>` : ''}
                         ${this.getRemarkButtonHtml('page', page.name, '添加备注')}
                     </div>
                     <a class="page-url" href="${pagesUrl}" target="_blank">${pagesUrl}</a>
