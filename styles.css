@@ -2747,6 +2747,7 @@ textarea::placeholder {
   margin-left: var(--spacing-sm);
   border: 1px solid transparent;
   white-space: nowrap;
+  -webkit-text-fill-color: currentColor; /* Ensure color property is used instead of parent's text-fill */
 }
 
 /* Account Colors - High Contrast */

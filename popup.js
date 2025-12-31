@@ -743,16 +743,30 @@ class CloudflareManager {
     async getAccountId() {
         if (this.accountId) return this.accountId;
         
-        // 优先从已加载的 zones 中获取 account_id
-        if (this.zones && this.zones.length > 0 && this.zones[0].account) {
-            this.accountId = this.zones[0].account.id;
-            return this.accountId;
-        }
-        
-        // 如果 zones 没有加载，尝试调用 /accounts API
+        // 1. 尝试通过 /accounts API 获取，并尝试匹配当前账户名称
         try {
-            const accounts = await this.apiRequest('/accounts');
+            const accounts = await this.apiRequest('/accounts?per_page=50');
             if (accounts && accounts.length > 0) {
+                // 尝试找到名称包含当前账户名（或被当前账户名包含）的账户
+                const currentName = (this.currentAccount?.name || '').toLowerCase();
+                let matchedAccount = accounts.find(acc => 
+                    acc.name.toLowerCase().includes(currentName) || 
+                    currentName.includes(acc.name.toLowerCase())
+                );
+                
+                // 如果是特定已知的超级管理员，优先匹配对应的邮箱
+                if (currentName === 'liubohn69') {
+                     const superMatch = accounts.find(acc => acc.name.toLowerCase().includes('liubohn69@gmail.com'));
+                     if (superMatch) matchedAccount = superMatch;
+                }
+
+                if (matchedAccount) {
+                    this.accountId = matchedAccount.id;
+                    return this.accountId;
+                }
+                
+                // 如果没有匹配，默认取第一个，但优先避开 "hotmail account" 这种看起来像副号的（如果能区分的话）
+                // 暂时取第一个
                 this.accountId = accounts[0].id;
                 return this.accountId;
             }
@@ -760,14 +774,37 @@ class CloudflareManager {
             console.warn('无法通过 /accounts 获取账户 ID:', error);
         }
         
-        // 如果都失败，尝试加载一个 zone 来获取 account_id
-        if (this.zones.length === 0) {
-            await this.loadZones();
-            if (this.zones.length > 0 && this.zones[0].account) {
-                this.accountId = this.zones[0].account.id;
-                return this.accountId;
+        // 2. 如果 zones 已经加载，尝试从 zones 获取
+        // 注意：这可能不准确，因为 zones 可能混合了多个账户
+        if (this.zones && this.zones.length > 0 && this.zones[0].account) {
+            // 尝试在 zones 中寻找匹配的账户
+            const currentName = (this.currentAccount?.name || '').toLowerCase();
+            const matchedZone = this.zones.find(z => 
+                z.account && (z.account.name.toLowerCase().includes(currentName) || currentName.includes(z.account.name.toLowerCase()))
+            );
+            
+            if (matchedZone) {
+                this.accountId = matchedZone.account.id;
+            } else {
+                 this.accountId = this.zones[0].account.id;
             }
+            return this.accountId;
         }
+        
+        // 3. 如果都失败，尝试加载 zones
+        if (this.zones.length === 0) {
+             try {
+                await this.loadZones();
+                if (this.zones.length > 0 && this.zones[0].account) {
+                    this.accountId = this.zones[0].account.id;
+                    return this.accountId;
+                }
+             } catch(e) { /* ignore */ }
+        }
+        
+        // 如果还是获取不到，但我们有 currentAccount 对象且它是从存储中加载的，
+        // 这里的 currentAccount 是我们自己存储的结构 {id, name, token}，id 是 uuid
+        // 并不是 Cloudflare 的 account_tag。
         
         throw new Error('无法获取账户 ID，请确保 API Token 有正确的权限');
     }
@@ -1835,18 +1872,57 @@ class CloudflareManager {
             return;
         }
         
-        
         this.currentAccount = this.accounts.find(a => a.id === accountId);
+        // 重置 accountId，以便 getAccountId 重新获取正确的 Cloudflare ID
+        this.accountId = null;
         
-        // 更新头部账户名显示
+        // Update header account name and color
         const headerAccountName = document.getElementById('headerAccountName');
         if (headerAccountName && this.currentAccount) {
             headerAccountName.textContent = this.currentAccount.name;
             headerAccountName.style.display = 'inline-block';
+            
+            // Remove old color classes
+            headerAccountName.className = 'header-account-name account-tag';
+            
+            // Generate and add color class. We need accountId for color generation.
+            // Since this.currentAccount doesn't store the actual Cloudflare Account ID (it stores internal ID),
+            // we might need to wait for loadAllZonesAndRecords or getAccountId to populate it.
+            // However, getAccountColorClass uses the passed ID as a key. 
+            // Ideally we should use the actual Cloudflare Account ID if possible, 
+            // but if we want stable colors for the "Account Switcher" entry which uses internal ID, we should stick to that?
+            // Wait, getAccountColorClass in renderAllRecords uses `zone.account.id`.
+            // So we must fetch the real Account ID to match colors.
+            
+            try {
+                // Try to get real account ID quickly if possible, or use the internal ID as fallback temporarily?
+                // Actually, let's just trigger load first, then update color?
+                // Or better: getAccountId() handles fetching if needed.
+                const realAccountId = await this.getAccountId();
+                if (realAccountId) {
+                    const colorClass = this.getAccountColorClass(realAccountId);
+                    headerAccountName.classList.add(colorClass);
+                }
+            } catch (e) {
+                console.warn('Could not determine account color immediately:', e);
+            }
         }
         
         await this.saveAccounts();
         await this.loadAllZonesAndRecords();
+        
+        // Update color again after load, just in case getAccountId failed initially but worked after loadZones
+        if (headerAccountName && this.currentAccount) {
+             try {
+                const realAccountId = await this.getAccountId();
+                if (realAccountId) {
+                     // Reset class list to ensure clean state (keeping base classes)
+                    headerAccountName.className = 'header-account-name account-tag';
+                    const colorClass = this.getAccountColorClass(realAccountId);
+                    headerAccountName.classList.add(colorClass);
+                }
+            } catch (e) { /* ignore */ }
+        }
     }
 
     /**
