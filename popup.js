@@ -1232,35 +1232,12 @@ class CloudflareManager {
     // 渲染所有记录，按域名分组
     renderAllRecords() {
         const list = document.getElementById('recordsList');
+        // 获取过滤后的记录用于统计和分组
         const filteredRecords = this.getFilteredRecords();
-        
-        if (filteredRecords.length === 0) {
-            if (this.searchQuery) {
-                list.innerHTML = `
-                    <div class="empty-state">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                            <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/>
-                            <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2"/>
-                        </svg>
-                        <p>未找到匹配 "${this.escapeHtml(this.searchQuery)}" 的记录</p>
-                    </div>
-                `;
-            } else {
-                list.innerHTML = `
-                    <div class="empty-state">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                        <p>暂无 DNS 记录</p>
-                    </div>
-                `;
-            }
-            return;
-        }
         
         list.innerHTML = '';
         
-        // 按域名分组
+        // 按域名分组记录
         const groupedRecords = {};
         filteredRecords.forEach(record => {
             if (!groupedRecords[record.zoneName]) {
@@ -1269,17 +1246,71 @@ class CloudflareManager {
             groupedRecords[record.zoneName].push(record);
         });
         
+        // 确定要显示的域名列表
+        let zonesToRender = this.zones;
+
+        // 1. 如果选择了特定域名筛选
+        if (this.selectedZoneId) {
+            zonesToRender = zonesToRender.filter(z => z.id === this.selectedZoneId);
+        }
+
+        // 2. 如果有搜索关键词
+        if (this.searchQuery) {
+            zonesToRender = zonesToRender.filter(z => {
+                const nameMatch = z.name.toLowerCase().includes(this.searchQuery);
+                const hasMatchingRecords = groupedRecords[z.name] && groupedRecords[z.name].length > 0;
+                return nameMatch || hasMatchingRecords;
+            });
+        }
+        
+        // 如果最终没有要显示的域名
+        if (zonesToRender.length === 0) {
+            // ... (keep empty state logic but adapted) ...
+             if (this.searchQuery) {
+                list.innerHTML = `
+                    <div class="empty-state">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                            <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/>
+                            <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                        <p>未找到匹配 "${this.escapeHtml(this.searchQuery)}" 的域名或记录</p>
+                    </div>
+                `;
+            } else {
+                list.innerHTML = `
+                    <div class="empty-state">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <p>暂无域名</p>
+                    </div>
+                `;
+            }
+            return;
+        }
+
         // 如果有搜索关键词，显示搜索结果统计
         if (this.searchQuery) {
             const searchInfo = document.createElement('div');
             searchInfo.className = 'search-result-info';
-            searchInfo.innerHTML = `找到 <strong>${filteredRecords.length}</strong> 条匹配的记录`;
+            // 计算匹配的域名数量和记录数量
+            const matchingZones = zonesToRender.length;
+            const matchingRecords = filteredRecords.length;
+            searchInfo.innerHTML = `找到 <strong>${matchingZones}</strong> 个域名，<strong>${matchingRecords}</strong> 条记录`;
             list.appendChild(searchInfo);
         }
         
-        // 渲染每个域名分组
-        Object.keys(groupedRecords).sort().forEach(zoneName => {
-            const records = groupedRecords[zoneName];
+        // 渲染域名分组
+        zonesToRender.sort((a, b) => {
+            const accountA = a.account?.name || '';
+            const accountB = b.account?.name || '';
+            if (accountA !== accountB) {
+                return accountA.localeCompare(accountB);
+            }
+            return a.name.localeCompare(b.name);
+        }).forEach(zone => {
+            const zoneName = zone.name;
+            const records = groupedRecords[zoneName] || [];
             const isCollapsed = this.collapsedZones.has(zoneName);
             
             // 域名分组容器
@@ -1287,10 +1318,9 @@ class CloudflareManager {
             groupContainer.className = 'zone-group';
             
             // 获取 zoneId 和账户信息
-            const firstRecord = records[0];
-            const zoneId = firstRecord?.zoneId || zoneName;
-            const accountName = firstRecord?.accountName || '';
-            const accountId = firstRecord?.accountId || '';
+            const zoneId = zone.id;
+            const accountName = zone.account?.name || '';
+            const accountId = zone.account?.id || '';
             
             // 生成账户标签 HTML
             let accountTagHtml = '';
@@ -1303,6 +1333,10 @@ class CloudflareManager {
             const groupHeader = document.createElement('div');
             groupHeader.className = `zone-group-header ${isCollapsed ? 'collapsed' : ''}`;
             const zoneRemarkBtn = this.getRemarkButtonHtml('zone', zoneId, '添加域名备注').replace('data-action="remark"', 'data-action="zone-remark"');
+            
+            // 如果没有记录，可以在数量显示上做区分
+            const countText = records.length > 0 ? `${records.length} 条记录` : '无记录';
+            
             groupHeader.innerHTML = `
                 <div class="zone-header-left">
                     <span class="zone-toggle">${isCollapsed ? '▶' : '▼'}</span>
@@ -1310,13 +1344,13 @@ class CloudflareManager {
                     ${accountTagHtml}
                     ${zoneRemarkBtn}
                 </div>
-                <span class="zone-record-count">${records.length} 条记录</span>
+                <span class="zone-record-count">${countText}</span>
             `;
             
             // 域名备注按钮事件
             groupHeader.querySelector('[data-action="zone-remark"]').addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.openRemarkModal('zone', zoneId, zoneName, `${records.length} 条 DNS 记录`);
+                this.openRemarkModal('zone', zoneId, zoneName, countText);
             });
             
             groupHeader.addEventListener('click', (e) => {
@@ -1329,56 +1363,64 @@ class CloudflareManager {
             const recordsContainer = document.createElement('div');
             recordsContainer.className = `zone-records ${isCollapsed ? 'collapsed' : ''}`;
             
-            // 该域名下的所有记录
-            records.forEach(record => {
-                const item = document.createElement('div');
-                item.className = 'record-item';
-                item.innerHTML = `
-                    <div class="record-type type-${record.type.toLowerCase()}">${record.type}</div>
-                    <div class="record-info">
-                        <div class="record-name-row">
-                            <span class="record-name">${this.escapeHtml(record.name)}</span>
-                            ${this.getRemarkButtonHtml('dns', record.id, '添加备注')}
+            if (records.length === 0) {
+                recordsContainer.innerHTML = '<div class="empty-records">暂无 DNS 记录</div>';
+                // 添加样式以美化空状态（可选）
+                recordsContainer.style.padding = '10px 20px';
+                recordsContainer.style.color = 'var(--text-muted)';
+                recordsContainer.style.fontSize = '12px';
+            } else {
+                // 该域名下的所有记录
+                records.forEach(record => {
+                    const item = document.createElement('div');
+                    item.className = 'record-item';
+                    item.innerHTML = `
+                        <div class="record-type type-${record.type.toLowerCase()}">${record.type}</div>
+                        <div class="record-info">
+                            <div class="record-name-row">
+                                <span class="record-name">${this.escapeHtml(record.name)}</span>
+                                ${this.getRemarkButtonHtml('dns', record.id, '添加备注')}
+                            </div>
+                            <div class="record-content">${this.escapeHtml(record.content)}</div>
                         </div>
-                        <div class="record-content">${this.escapeHtml(record.content)}</div>
-                    </div>
-                    <div class="record-meta">
-                        <div class="record-proxied ${record.proxied ? 'proxied-on' : 'proxied-off'}">
-                            ${record.proxied ? '☁️' : '⚙️'}
+                        <div class="record-meta">
+                            <div class="record-proxied ${record.proxied ? 'proxied-on' : 'proxied-off'}">
+                                ${record.proxied ? '☁️' : '⚙️'}
+                            </div>
+                            <div class="record-ttl">${record.ttl === 1 ? '自动' : record.ttl + 's'}</div>
                         </div>
-                        <div class="record-ttl">${record.ttl === 1 ? '自动' : record.ttl + 's'}</div>
-                    </div>
-                    <div class="record-actions">
-                        <button class="icon-btn" title="编辑" data-action="edit">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </button>
-                        <button class="icon-btn" title="删除" data-action="delete">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                                <polyline points="3 6 5 6 21 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                        </button>
-                    </div>
-                `;
-                
-                item.querySelector('[data-action="remark"]').addEventListener('click', (e) => {
-                    this.handleRemarkButtonClick(e, 'dns', record.id, record.name, `${record.type} → ${record.content}`);
+                        <div class="record-actions">
+                            <button class="icon-btn" title="编辑" data-action="edit">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </button>
+                            <button class="icon-btn" title="删除" data-action="delete">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                    <polyline points="3 6 5 6 21 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                            </button>
+                        </div>
+                    `;
+                    
+                    item.querySelector('[data-action="remark"]').addEventListener('click', (e) => {
+                        this.handleRemarkButtonClick(e, 'dns', record.id, record.name, `${record.type} → ${record.content}`);
+                    });
+                    item.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        console.log('Edit button clicked for record:', record.name);
+                        this.editRecord(record);
+                    });
+                    item.querySelector('[data-action="delete"]').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.confirmDeleteRecord(record.zoneId, record.id);
+                    });
+                    
+                    recordsContainer.appendChild(item);
                 });
-                item.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    console.log('Edit button clicked for record:', record.name);
-                    this.editRecord(record);
-                });
-                item.querySelector('[data-action="delete"]').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.confirmDeleteRecord(record.zoneId, record.id);
-                });
-                
-                recordsContainer.appendChild(item);
-            });
+            }
             
             groupContainer.appendChild(recordsContainer);
             list.appendChild(groupContainer);
