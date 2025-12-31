@@ -1364,11 +1364,8 @@ class CloudflareManager {
             recordsContainer.className = `zone-records ${isCollapsed ? 'collapsed' : ''}`;
             
             if (records.length === 0) {
-                recordsContainer.innerHTML = '<div class="empty-records">暂无 DNS 记录</div>';
-                // 添加样式以美化空状态（可选）
-                recordsContainer.style.padding = '10px 20px';
-                recordsContainer.style.color = 'var(--text-muted)';
-                recordsContainer.style.fontSize = '12px';
+                recordsContainer.classList.add('empty-records-container');
+                recordsContainer.innerHTML = '<div class="empty-records-text">暂无 DNS 记录</div>';
             } else {
                 // 该域名下的所有记录
                 records.forEach(record => {

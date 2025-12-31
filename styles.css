@@ -831,12 +831,25 @@ body {
 .zone-records {
   overflow: hidden;
   max-height: 2000px;
-  transition: max-height 0.3s ease-out, opacity 0.2s ease;
+  transition: max-height 0.3s ease-out, opacity 0.2s ease, padding 0.3s ease;
 }
 
 .zone-records.collapsed {
   max-height: 0;
   opacity: 0;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  border-bottom: none !important;
+}
+
+.empty-records-container {
+  padding: 10px 20px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.empty-records-text {
+  font-style: italic;
 }
 
 /* =====================================================
