@@ -1334,16 +1334,8 @@ class CloudflareManager {
     updateUI() {
         this.renderAccountSelector();
         
-        // 更新头部账户名显示
-        const headerAccountName = document.getElementById('headerAccountName');
-        if (headerAccountName) {
-            if (this.currentAccount) {
-                headerAccountName.textContent = this.currentAccount.name;
-                headerAccountName.style.display = 'inline-block';
-            } else {
-                headerAccountName.style.display = 'none';
-            }
-        }
+        // 更新头部账户名显示和颜色
+        this.updateHeaderAccountUI();
         
         const tabsSection = document.getElementById('tabsSection');
         const statsSection = document.getElementById('statsSection');
@@ -1364,6 +1356,37 @@ class CloudflareManager {
             // 有选中的账户，加载数据
             welcomeSection.style.display = 'none';
             this.loadAllZonesAndRecords();
+        }
+    }
+
+    /**
+     * 更新头部账户名称显示和颜色
+     */
+    async updateHeaderAccountUI() {
+        const headerAccountName = document.getElementById('headerAccountName');
+        if (!headerAccountName) return;
+
+        if (this.currentAccount) {
+            headerAccountName.textContent = this.currentAccount.name;
+            headerAccountName.style.display = 'inline-block';
+            
+            // 基础类名，保持 header-account-badge
+            headerAccountName.className = 'header-account-badge';
+            
+            try {
+                // 尝试获取真实的 Cloudflare 账户 ID 以匹配颜色
+                // 此时 getAccountId 会尝试通过 API 或已加载的 zones 获取
+                const realAccountId = await this.getAccountId();
+                if (realAccountId) {
+                    const colorClass = this.getAccountColorClass(realAccountId);
+                    headerAccountName.classList.add(colorClass);
+                }
+            } catch (e) {
+                // 如果暂时获取不到 ID（例如还在加载中），保持默认样式
+                console.log('未获取到账户 ID，保持默认颜色');
+            }
+        } else {
+            headerAccountName.style.display = 'none';
         }
     }
 
@@ -1439,10 +1462,11 @@ class CloudflareManager {
             
             // 更新备注统计卡片
             this.updateNotesStatCard();
+            this.renderAllRecords();
+            // 加载完成后再次更新头部颜色，确保获取到了真实的 Account ID
+            this.updateHeaderAccountUI();
             
             this.hideLoading();
-            this.renderAllRecords();
-            
         } catch (error) {
             this.hideLoading();
             this.showToast(error.message, 'error');
@@ -1876,53 +1900,13 @@ class CloudflareManager {
         // 重置 accountId，以便 getAccountId 重新获取正确的 Cloudflare ID
         this.accountId = null;
         
-        // Update header account name and color
-        const headerAccountName = document.getElementById('headerAccountName');
-        if (headerAccountName && this.currentAccount) {
-            headerAccountName.textContent = this.currentAccount.name;
-            headerAccountName.style.display = 'inline-block';
-            
-            // Remove old color classes
-            headerAccountName.className = 'header-account-name account-tag';
-            
-            // Generate and add color class. We need accountId for color generation.
-            // Since this.currentAccount doesn't store the actual Cloudflare Account ID (it stores internal ID),
-            // we might need to wait for loadAllZonesAndRecords or getAccountId to populate it.
-            // However, getAccountColorClass uses the passed ID as a key. 
-            // Ideally we should use the actual Cloudflare Account ID if possible, 
-            // but if we want stable colors for the "Account Switcher" entry which uses internal ID, we should stick to that?
-            // Wait, getAccountColorClass in renderAllRecords uses `zone.account.id`.
-            // So we must fetch the real Account ID to match colors.
-            
-            try {
-                // Try to get real account ID quickly if possible, or use the internal ID as fallback temporarily?
-                // Actually, let's just trigger load first, then update color?
-                // Or better: getAccountId() handles fetching if needed.
-                const realAccountId = await this.getAccountId();
-                if (realAccountId) {
-                    const colorClass = this.getAccountColorClass(realAccountId);
-                    headerAccountName.classList.add(colorClass);
-                }
-            } catch (e) {
-                console.warn('Could not determine account color immediately:', e);
-            }
-        }
+        // 更新头部 UI
+        await this.updateHeaderAccountUI();
         
         await this.saveAccounts();
         await this.loadAllZonesAndRecords();
         
-        // Update color again after load, just in case getAccountId failed initially but worked after loadZones
-        if (headerAccountName && this.currentAccount) {
-             try {
-                const realAccountId = await this.getAccountId();
-                if (realAccountId) {
-                     // Reset class list to ensure clean state (keeping base classes)
-                    headerAccountName.className = 'header-account-name account-tag';
-                    const colorClass = this.getAccountColorClass(realAccountId);
-                    headerAccountName.classList.add(colorClass);
-                }
-            } catch (e) { /* ignore */ }
-        }
+        // 数据加载完成后，loadAllZonesAndRecords 内部会自动再次调用 updateHeaderAccountUI
     }
 
     /**
