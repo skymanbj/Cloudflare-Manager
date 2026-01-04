@@ -1,16 +1,12 @@
 (function() {
-    // 立即日志，确认脚本已加载
     console.log('%c Antigravity: [Content Script] Loaded at ' + new Date().toLocaleTimeString(), 'color: #00ff00; font-weight: bold;');
 
-    // 检查是否带有自动化参数
     const urlParams = new URLSearchParams(window.location.search);
     const hasTrigger = urlParams.has('antigravity_auto_rename');
     
-    if (!hasTrigger) {
-        return;
-    }
+    if (!hasTrigger) return;
 
-    console.log('Antigravity: [Content Script] Triggering automation...');
+    console.log('Antigravity: [Content Script] Automation triggered');
 
     // 延迟清理参数
     setTimeout(() => {
@@ -27,28 +23,53 @@
     const tryFocusInput = () => {
         if (inputFocused) return true;
 
-        // 寻找页面上的输入框，优先寻找在 Modal 里的或者最近出现的
-        // Cloudflare 的更名输入框通常是 text 类型，且周围有 "Name" 标签
-        const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'))
-            .filter(input => {
-                // 排除搜索框等无关输入框
-                const placeholder = (input.placeholder || '').toLowerCase();
-                return !placeholder.includes('search') && !placeholder.includes('filter');
-            });
+        // Cloudflare 的更名输入框通常具有特征
+        // 1. 它是当前显示的 modal 或部分中的唯一的输入框
+        // 2. 它可能有 name="name" 属性
+        const allInputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
+        
+        // 过滤规则：
+        // - 必须是可见的
+        // - 优先匹配 name="name" 或者 id 包含 "name" 的
+        // - 排除掉搜索框
+        const possibleInputs = allInputs.filter(input => {
+            const rect = input.getBoundingClientRect();
+            const isVisible = rect.width > 0 && rect.height > 0 && window.getComputedStyle(input).display !== 'none';
+            if (!isVisible) return false;
 
-        if (inputs.length > 0) {
-            // 假设最后一个出现的输入框是我们要找的（通常在 Modal 里）
-            const targetInput = inputs[inputs.length - 1];
+            const name = (input.name || '').toLowerCase();
+            const id = (input.id || '').toLowerCase();
+            const placeholder = (input.placeholder || '').toLowerCase();
             
-            console.log('Antigravity: [Content Script] Input found, focusing...', targetInput);
-            targetInput.focus();
+            // 排除明显的搜索/过滤框
+            if (placeholder.includes('search') || placeholder.includes('filter') || id.includes('search')) return false;
+
+            return true;
+        });
+
+        if (possibleInputs.length > 0) {
+            // 优先权：1. name="name", 2. 最后一个可见的输入框（SPA Modal 通常是最后插入）
+            const targetInput = possibleInputs.find(i => i.name === 'name') || possibleInputs[possibleInputs.length - 1];
             
-            // 选中文本，方便用户直接修改
-            try {
+            console.log('Antigravity: [Content Script] Target input detected:', targetInput);
+            
+            // 强力聚焦：尝试多次且使用多种方法
+            const focusMe = () => {
+                targetInput.focus();
                 targetInput.select();
-            } catch(e) {}
+                // 某些 React 组件需要触发一次 input 事件来激活底层逻辑
+                targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                // 添加一个临时的高亮边框，帮助用户确认
+                targetInput.style.outline = '2px solid #00ff00';
+            };
+
+            focusMe();
+            // 延迟一点再试一次，防止被 SPA 框架重新夺走焦点
+            setTimeout(focusMe, 100);
+            setTimeout(focusMe, 500);
 
             inputFocused = true;
+            console.log('%c Antigravity: [Content Script] Input focused and selected!', 'color: #00ff00; font-weight: bold;');
             return true;
         }
         return false;
@@ -59,6 +80,7 @@
         if (buttonClicked) return true;
         attempts++;
         
+        // 如果是 Worker 页面，可能需要滚屏；Pages 页面按钮就在设置底部
         window.scrollTo(0, document.documentElement.scrollHeight);
         
         const candidates = Array.from(document.querySelectorAll('button, a, span, div[role="button"]'))
@@ -70,20 +92,17 @@
 
         if (candidates.length > 0) {
             const target = candidates.find(el => el.tagName === 'BUTTON' || el.classList.contains('btn')) || candidates[0];
-            console.log('Antigravity: [Content Script] Button found, clicking...');
+            console.log('Antigravity: [Content Script] "Rename" button found, clicking...');
             
             target.scrollIntoView({ block: 'center' });
-            target.click();
             
-            // 辅助点击
+            // 模拟真实交互
             const eventOptions = { bubbles: true, cancelable: true, view: window };
             target.dispatchEvent(new MouseEvent('mousedown', eventOptions));
             target.dispatchEvent(new MouseEvent('mouseup', eventOptions));
-            target.dispatchEvent(new MouseEvent('click', eventOptions));
+            target.click();
 
             buttonClicked = true;
-            
-            // 点击后立即开始寻找输入框
             startFocusPolling();
             return true;
         }
@@ -102,21 +121,27 @@
         }, 500);
     };
 
-    // 启动轮询
+    // 主巡检器
     const mainInterval = setInterval(() => {
-        if (tryClickButton() || attempts >= maxAttempts) {
+        if (!buttonClicked) {
+            if (tryClickButton() && buttonClicked) {
+                // 如果第一次就点到了，启动后续波次
+            }
+        } else if (!inputFocused) {
+            tryFocusInput();
+        }
+
+        if (buttonClicked && inputFocused || attempts >= maxAttempts) {
             clearInterval(mainInterval);
         }
     }, 2000);
 
-    // MutationObserver 辅助
+    // DOM 变化监听
     const observer = new MutationObserver(() => {
         if (!buttonClicked) {
-            if (tryClickButton()) {
-                // 已经在 tryClickButton 里处理了 startFocusPolling
-            }
+           tryClickButton();
         } else if (!inputFocused) {
-            tryFocusInput();
+           tryFocusInput();
         }
     });
 
