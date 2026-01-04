@@ -325,6 +325,7 @@
                     <div class="search-box">
                         <input type="text" id="workersSearchInput" class="search-input" placeholder="搜索 Workers...">
                     </div>
+                    <button id="createNewWorkerBtn" class="btn-primary btn-sm" title="新建 Worker">➕ 新建</button>
                     <button id="exportWorkersBtn" class="btn-secondary btn-sm" title="导出Workers">📤 导出</button>
                 </div>
             </div>
@@ -341,6 +342,7 @@
                     <div class="search-box">
                         <input type="text" id="pagesSearchInput" class="search-input" placeholder="搜索 Pages...">
                     </div>
+                    <button id="createNewPagesBtn" class="btn-primary btn-sm" title="新建 Pages 项目">➕ 新建</button>
                     <button id="exportPagesBtn" class="btn-secondary btn-sm" title="导出Pages">📤 导出</button>
                 </div>
             </div>
@@ -434,6 +436,15 @@
                         <input type="file" id="localImageInput" accept="image/*" style="display: none;">
                     </div>
                     <div class="form-group">
+                        <label for="projectAlias">项目别名 (仅本地显示)</label>
+                        <input type="text" id="projectAlias" class="text-input" placeholder="例如: 博客前端, 支付接口">
+                    </div>
+                    
+                    <div id="cloudflareRenameSection" class="cloudflare-rename-section" style="display: none;">
+                        <p class="rename-hint">💡 提示：点击列表中的项目名称可直接前往 Cloudflare 官网重命名资源。更名后请手动修改上方的“项目别名”以保持显示一致。</p>
+                    </div>
+
+                    <div class="form-group">
                         <label for="remarkTags">标签（用逗号分隔）</label>
                         <input type="text" id="remarkTags" class="text-input" placeholder="例如: 生产环境, API, 重要">
                     </div>
@@ -451,6 +462,45 @@
     <div id="globalRemarkTooltip" class="remark-tooltip-global"></div>
 
     <script src="marked.min.js"></script>
+    <!-- 用于 Worker 脚本上传的隐藏 input -->
+    <input type="file" id="workerScriptFile" style="display: none;" accept=".js">
+
+    <!-- 部署配置弹窗 -->
+    <div id="deployModal" class="modal" style="display: none;">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="deployModalTitle">部署配置</h3>
+                <button class="icon-btn" id="closeDeployModalBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="pagesDeployOptions" style="display: none;">
+                    <div class="form-group">
+                        <label for="deployBranch">部署分支</label>
+                        <input type="text" id="deployBranch" class="text-input" placeholder="例如: main" value="main">
+                        <p class="form-help">将从指定的分支触发一次新的构建。</p>
+                    </div>
+                </div>
+                <div id="workersDeployOptions" style="display: none;">
+                    <div class="form-group">
+                        <label>脚本内容</label>
+                        <textarea id="workerScriptContent" class="text-input" placeholder="在此粘贴 Worker 脚本内容..."></textarea>
+                    </div>
+                    <div class="form-row">
+                        <button class="btn btn-secondary btn-sm" id="uploadScriptBtn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            上传 .js 文件
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelDeployBtn">取消</button>
+                <button class="btn btn-primary" id="startDeployBtn">开始部署</button>
+            </div>
+        </div>
+    </div>
+
     <script src="popup.js"></script>
 </body>
 </html>

@@ -623,17 +623,21 @@ class CloudflareManager {
         }
 
         const url = `https://api.cloudflare.com/client/v4${endpoint}`;
-        const options = {
-            method,
-            headers: {
-                'Authorization': `Bearer ${this.currentAccount.token}`,
-                'Content-Type': 'application/json'
-            }
-        };
-
-        if (body) {
-            options.body = JSON.stringify(body);
+    const options = {
+        method,
+        headers: {
+            'Authorization': `Bearer ${this.currentAccount.token}`
         }
+    };
+
+    // Only set Content-Type to application/json if body is NOT FormData
+    if (body && !(body instanceof FormData)) {
+        options.headers['Content-Type'] = 'application/json';
+        options.body = JSON.stringify(body);
+    } else if (body instanceof FormData) {
+        // When using FormData, fetch automatically sets the correct Content-Type with boundary
+        options.body = body;
+    }
 
         try {
             const response = await fetch(url, options);
@@ -1055,12 +1059,40 @@ class CloudflareManager {
             tab.addEventListener('click', () => this.switchTab(tab.dataset.tab));
         });
 
+        // New Deployment buttons
+        document.getElementById('createNewWorkerBtn').addEventListener('click', async () => {
+            const accountId = await this.getAccountId();
+            if (accountId) {
+                window.open(`https://dash.cloudflare.com/${accountId}/workers-and-pages/create/workers`, '_blank');
+            } else {
+                this.showToast('无法获取账户 ID', 'error');
+            }
+        });
+        document.getElementById('createNewPagesBtn').addEventListener('click', async () => {
+            const accountId = await this.getAccountId();
+            if (accountId) {
+                window.open(`https://dash.cloudflare.com/${accountId}/workers-and-pages/create/pages`, '_blank');
+            } else {
+                this.showToast('无法获取账户 ID', 'error');
+            }
+        });
+        document.getElementById('exportWorkersBtn').addEventListener('click', () => this.exportWorkers());
+        document.getElementById('exportPagesBtn').addEventListener('click', () => this.exportPages());
+
         // DNS record form
         document.getElementById('addRecordBtn').addEventListener('click', () => this.showRecordForm());
         document.getElementById('cancelRecordBtn').addEventListener('click', () => this.hideRecordForm());
         document.getElementById('saveRecordBtn').addEventListener('click', () => this.saveRecord());
         document.getElementById('recordType').addEventListener('change', (e) => this.handleRecordTypeChange(e.target.value));
 
+        // Deployment modal
+        document.getElementById('closeDeployModalBtn').addEventListener('click', () => this.hideDeployModal());
+        document.getElementById('cancelDeployBtn').addEventListener('click', () => this.hideDeployModal());
+        document.getElementById('startDeployBtn').addEventListener('click', () => this.startDeployment());
+        document.getElementById('uploadScriptBtn').addEventListener('click', () => document.getElementById('workerScriptFile').click());
+        document.getElementById('workerScriptFile').addEventListener('change', (e) => this.handleWorkerScriptUpload(e));
+
+        // Toggle sidebar
         // Toggle all zones
         document.getElementById('toggleAllBtn').addEventListener('click', () => this.toggleAllZones());
 
@@ -2264,9 +2296,13 @@ class CloudflareManager {
         if (!this.workersSearchQuery) {
             return this.workers;
         }
-        return this.workers.filter(w => 
-            w.id.toLowerCase().includes(this.workersSearchQuery)
-        );
+        return this.workers.filter(w => {
+            const query = this.workersSearchQuery;
+            const remark = this.getRemark('worker', w.id);
+            const alias = remark?.alias?.toLowerCase() || '';
+            const id = w.id.toLowerCase();
+            return id.includes(query) || alias.includes(query);
+        });
     }
 
     renderWorkers() {
@@ -2312,6 +2348,11 @@ class CloudflareManager {
             const createdDate = worker.created_on ? new Date(worker.created_on).toLocaleDateString('zh-CN') : '-';
             const modifiedDate = worker.modified_on ? new Date(worker.modified_on).toLocaleDateString('zh-CN') : '-';
             
+            const remark = this.getRemark('worker', worker.id);
+            const alias = remark?.alias;
+            const displayName = alias || worker.id;
+            const originalIdHtml = alias ? `<span class="resource-id-hint" title="原始 ID: ${this.escapeHtml(worker.id)}">${this.escapeHtml(worker.id)}</span>` : '';
+
             const item = document.createElement('div');
             item.className = 'worker-item';
             item.innerHTML = `
@@ -2322,7 +2363,15 @@ class CloudflareManager {
                 </div>
                 <div class="worker-info">
                     <div class="worker-name-row">
-                        <span class="worker-name">${this.escapeHtml(worker.id)}</span>
+                        <a href="https://dash.cloudflare.com/${worker.account?.id || ''}/workers/services/view/${worker.id}/production/settings?antigravity_auto_rename=1" class="worker-name-link dashboard-rename-link" data-type="worker" data-id="${worker.id}" title="前往 Cloudflare 重命名资源 (自动滚屏并点击按钮)">
+                            <span class="worker-name">${this.escapeHtml(displayName)}</span>
+                        </a>
+                        ${originalIdHtml}
+                        <button class="edit-alias-btn" data-action="rename" title="修改项目名称">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+                            </svg>
+                        </button>
                         ${worker.account ? `<span class="account-tag ${this.getAccountColorClass(worker.account.id)}">${this.escapeHtml(worker.account.name)}</span>` : ''}
                         ${this.getRemarkButtonHtml('worker', worker.id, '添加备注')}
                     </div>
@@ -2332,16 +2381,37 @@ class CloudflareManager {
                     </div>
                 </div>
                 <div class="worker-actions">
-                    <a href="https://dash.cloudflare.com/?to=/:account/workers/services/view/${worker.id}" target="_blank" title="在 Cloudflare 控制台中查看">
+                    <a class="worker-url-btn" href="https://dash.cloudflare.com/${worker.account?.id || ''}/workers/services/view/${worker.id}/production" target="_blank" title="在 Dashboard 中查看">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </a>
+                    <button class="delete-btn" data-action="delete" title="删除 Worker">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            <line x1="10" y1="11" x2="10" y2="17"></line>
+                            <line x1="14" y1="11" x2="14" y2="17"></line>
+                        </svg>
+                    </button>
                 </div>
             `;
             
             item.querySelector('[data-action="remark"]').addEventListener('click', (e) => {
                 this.handleRemarkButtonClick(e, 'worker', worker.id, worker.id, `创建于 ${createdDate}`);
+            });
+
+            item.querySelector('[data-action="rename"]').addEventListener('click', (e) => {
+                this.handleRemarkButtonClick(e, 'worker', worker.id, worker.id, `创建于 ${createdDate}`);
+            });
+            
+            item.querySelector('.dashboard-rename-link').addEventListener('click', (e) => {
+                e.preventDefault();
+                this.automateDashboardRename(e.currentTarget.href);
+            });
+
+            item.querySelector('[data-action="delete"]').addEventListener('click', () => {
+                this.confirmDeleteWorker(worker);
             });
             
             list.appendChild(item);
@@ -2381,10 +2451,14 @@ class CloudflareManager {
         if (!this.pagesSearchQuery) {
             return this.pages;
         }
-        return this.pages.filter(p => 
-            p.name.toLowerCase().includes(this.pagesSearchQuery) ||
-            (p.subdomain && p.subdomain.toLowerCase().includes(this.pagesSearchQuery))
-        );
+        return this.pages.filter(p => {
+            const query = this.pagesSearchQuery;
+            const remark = this.getRemark('page', p.name);
+            const alias = remark?.alias?.toLowerCase() || '';
+            const name = p.name.toLowerCase();
+            const subdomain = (p.subdomain || '').toLowerCase();
+            return name.includes(query) || subdomain.includes(query) || alias.includes(query);
+        });
     }
 
     renderPages() {
@@ -2433,6 +2507,11 @@ class CloudflareManager {
             const latestDeployment = page.latest_deployment;
             const deployStatus = latestDeployment?.latest_stage?.status || 'unknown';
             
+            const remark = this.getRemark('page', page.name);
+            const alias = remark?.alias;
+            const displayName = alias || page.name;
+            const originalNameHtml = alias ? `<span class="resource-id-hint" title="项目 ID: ${this.escapeHtml(page.name)}">${this.escapeHtml(page.name)}</span>` : '';
+
             const item = document.createElement('div');
             item.className = 'page-item';
             item.innerHTML = `
@@ -2444,7 +2523,15 @@ class CloudflareManager {
                 </div>
                 <div class="page-info">
                     <div class="page-name-row">
-                        <span class="page-name">${this.escapeHtml(page.name)}</span>
+                        <a href="https://dash.cloudflare.com/${page.account?.id || ''}/pages/view/${page.name}/settings?antigravity_auto_rename=1" class="page-name-link dashboard-rename-link" data-type="page" data-id="${page.name}" title="前往 Cloudflare 重命名资源 (自动滚屏并点击按钮)">
+                            <span class="page-name">${this.escapeHtml(displayName)}</span>
+                        </a>
+                        ${originalNameHtml}
+                        <button class="edit-alias-btn" data-action="rename" title="修改项目名称">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+                            </svg>
+                        </button>
                         ${page.account ? `<span class="account-tag ${this.getAccountColorClass(page.account.id)}">${this.escapeHtml(page.account.name)}</span>` : ''}
                         ${this.getRemarkButtonHtml('page', page.name, '添加备注')}
                     </div>
@@ -2457,16 +2544,37 @@ class CloudflareManager {
                     </div>
                 </div>
                 <div class="page-actions">
-                    <a href="https://dash.cloudflare.com/?to=/:account/pages/view/${page.name}" target="_blank" title="在 Cloudflare 控制台中查看">
+                    <a class="page-url-btn" href="https://dash.cloudflare.com/${page.account?.id || ''}/pages/view/${page.name}" target="_blank" title="在 Dashboard 中查看">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
                     </a>
+                    <button class="delete-btn" data-action="delete" title="删除项目">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            <line x1="10" y1="11" x2="10" y2="17"></line>
+                            <line x1="14" y1="11" x2="14" y2="17"></line>
+                        </svg>
+                    </button>
                 </div>
             `;
             
             item.querySelector('[data-action="remark"]').addEventListener('click', (e) => {
                 this.handleRemarkButtonClick(e, 'page', page.name, page.name, pagesUrl);
+            });
+
+            item.querySelector('[data-action="rename"]').addEventListener('click', (e) => {
+                this.handleRemarkButtonClick(e, 'page', page.name, page.name, pagesUrl);
+            });
+            
+            item.querySelector('.dashboard-rename-link').addEventListener('click', (e) => {
+                e.preventDefault();
+                this.automateDashboardRename(e.currentTarget.href);
+            });
+
+            item.querySelector('[data-action="delete"]').addEventListener('click', () => {
+                this.confirmDeletePages(page);
             });
             
             list.appendChild(item);
@@ -2491,6 +2599,181 @@ class CloudflareManager {
         const filename = `pages_${new Date().toISOString().slice(0,10)}.csv`;
         
         const result = await this.downloadCSV(csv, filename);
+    }
+
+    // =====================================================
+    // Deployment Methods
+    // =====================================================
+    showDeploymentModal(type, item) {
+        this.deployingType = type;
+        this.deployingItem = item;
+        
+        const modal = document.getElementById('deployModal');
+        const pagesOptions = document.getElementById('pagesDeployOptions');
+        const workersOptions = document.getElementById('workersDeployOptions');
+        const title = document.getElementById('deployModalTitle');
+
+        // Reset options visibility
+        pagesOptions.style.display = 'none';
+        workersOptions.style.display = 'none';
+
+        if (type === 'page') {
+            title.textContent = `部署 Pages: ${item.name}`;
+            pagesOptions.style.display = 'block';
+            document.getElementById('deployBranch').value = 'main';
+        } else if (type === 'worker') {
+            title.textContent = `发布 Worker: ${item.id}`;
+            workersOptions.style.display = 'block';
+            document.getElementById('workerScriptContent').value = '';
+        }
+
+        modal.style.display = 'flex';
+    }
+
+    hideDeployModal() {
+        document.getElementById('deployModal').style.display = 'none';
+        this.deployingType = null;
+        this.deployingItem = null;
+    }
+
+    async startDeployment() {
+        if (this.deployingType === 'page') {
+            const branch = document.getElementById('deployBranch').value.trim() || 'main';
+            await this.triggerPagesDeployment(this.deployingItem, branch);
+        } else {
+            const code = document.getElementById('workerScriptContent').value.trim();
+            const name = this.deployingItem.id;
+
+            if (!code) {
+                this.showToast('请输入或上传脚本内容', 'warning');
+                return;
+            }
+            
+            await this.uploadWorkerScript(this.deployingItem, code);
+        }
+        this.hideDeployModal();
+    }
+
+
+
+    async handleWorkerScriptUpload(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            document.getElementById('workerScriptContent').value = event.target.result;
+        };
+        reader.readAsText(file);
+    }
+
+    async triggerPagesDeployment(page, branch) {
+        const accountId = page.account?.id;
+        if (!accountId) {
+            this.showToast('未找到关联的账户 ID', 'error');
+            return;
+        }
+
+        try {
+            this.showLoading();
+            // Pages Create Deployment with branch
+            const body = { branch };
+            await this.apiRequest(`/accounts/${accountId}/pages/projects/${page.name}/deployments`, 'POST', body);
+            this.showToast(`Pages 部署已触发: ${page.name} (${branch})`, 'success');
+            
+            setTimeout(() => this.loadPagesAndRender(), 2000);
+        } catch (error) {
+            console.error('Pages deployment failed:', error);
+            this.showToast(`部署失败: ${error.message}`, 'error');
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    async uploadWorkerScript(worker, code) {
+        const accountId = worker.account?.id;
+        if (!accountId) {
+            this.showToast('未找到关联的账户 ID', 'error');
+            return;
+        }
+
+        try {
+            this.showLoading();
+            
+            // 对 Worker 来说，“新建部署”意味着上传脚本并发布
+            // 1. 上传脚本/创建新版本
+            // 注意：Cloudflare API 的 Worker 上传通常需要 application/javascript 或 multipart/form-data
+            const url = `/accounts/${accountId}/workers/scripts/${worker.id}`;
+            
+            // 简单的脚本上传 (Module 模式需要更复杂的 multipart)
+            // 这里尝试使用 text/javascript 方式，或者包装成 FormData
+            const formData = new FormData();
+            const metadata = {
+                main_module: 'index.js'
+            };
+            formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+            formData.append('script', new Blob([code], { type: 'application/javascript' }), 'index.js');
+
+            await this.apiRequest(url, 'PUT', formData);
+            this.showToast(`Worker 脚本已更新并发布: ${worker.id}`, 'success');
+            
+            setTimeout(() => this.loadWorkersAndRender(), 2000);
+        } catch (error) {
+            console.error('Worker upload failed:', error);
+            this.showToast(`上传失败: ${error.message}`, 'error');
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    confirmDeletePages(page) {
+        if (confirm(`确定要删除 Pages 项目 "${page.name}" 吗？此操作不可撤销。`)) {
+            this.deletePagesProject(page);
+        }
+    }
+
+    confirmDeleteWorker(worker) {
+        if (confirm(`确定要删除 Worker "${worker.id}" 吗？此操作不可撤销。`)) {
+            this.deleteWorker(worker);
+        }
+    }
+
+    async deletePagesProject(page) {
+        const accountId = page.account?.id;
+        if (!accountId) {
+            this.showToast('未找到关联的账户 ID', 'error');
+            return;
+        }
+        try {
+            this.showLoading();
+            await this.apiRequest(`/accounts/${accountId}/pages/projects/${page.name}`, 'DELETE');
+            this.showToast(`Pages 项目 "${page.name}" 已删除`, 'success');
+            await this.loadPagesAndRender();
+        } catch (error) {
+            console.error('Delete Pages project failed:', error);
+            this.showToast(`删除失败: ${error.message}`, 'error');
+        } finally {
+            this.hideLoading();
+        }
+    }
+
+    async deleteWorker(worker) {
+        const accountId = worker.account?.id;
+        if (!accountId) {
+            this.showToast('未找到关联的账户 ID', 'error');
+            return;
+        }
+        try {
+            this.showLoading();
+            await this.apiRequest(`/accounts/${accountId}/workers/scripts/${worker.id}`, 'DELETE');
+            this.showToast(`Worker "${worker.id}" 已删除`, 'success');
+            await this.loadWorkersAndRender();
+        } catch (error) {
+            console.error('Delete worker failed:', error);
+            this.showToast(`删除失败: ${error.message}`, 'error');
+        } finally {
+            this.hideLoading();
+        }
     }
 
     // =====================================================
@@ -2605,7 +2888,7 @@ class CloudflareManager {
             });
         });
     }
-    
+
     /**
      * 获取备注的key
      */
@@ -2742,6 +3025,15 @@ class CloudflareManager {
     /**
      * 打开备注弹窗
      */
+    /**
+     * 自动在 Cloudflare Dashboard 设置页面滚屏并点击重命名
+     */
+    async automateDashboardRename(url) {
+        // 直接跳转，url 中已带有 antigravity_auto_rename=1 参数
+        // 由 content.js 接手自动化逻辑，这样即便 popup 关闭也没关系
+        window.open(url, '_blank');
+    }
+
     openRemarkModal(type, id, name, detail) {
         this.currentRemarkTarget = { type, id, name, detail };
         
@@ -2762,10 +3054,17 @@ class CloudflareManager {
             ${detail ? `<div class="remark-target-detail">${this.escapeHtml(detail)}</div>` : ''}
         `;
         
-        // 填入现有备注
+        // 填入现有备注和别名
         const existingRemark = this.getRemark(type, id);
         document.getElementById('remarkContent').value = existingRemark?.content || '';
         document.getElementById('remarkTags').value = existingRemark?.tags?.join(', ') || '';
+        document.getElementById('projectAlias').value = existingRemark?.alias || '';
+
+        // 显示/隐藏 Cloudflare 直接更名选项 (已简化为仅根据类型显示/隐藏容器)
+        const renameSection = document.getElementById('cloudflareRenameSection');
+        if (renameSection) {
+            renameSection.style.display = (type === 'worker' || type === 'page') ? 'block' : 'none';
+        }
         
         // 显示/隐藏删除按钮
         document.getElementById('deleteRemarkBtn').style.display = 
@@ -2800,6 +3099,7 @@ class CloudflareManager {
         this.currentRemarkTarget = null;
         document.getElementById('remarkContent').value = '';
         document.getElementById('remarkTags').value = '';
+        document.getElementById('projectAlias').value = '';
     }
     
     /**
@@ -2812,14 +3112,16 @@ class CloudflareManager {
         
         const { type, id, name } = this.currentRemarkTarget;
         const content = document.getElementById('remarkContent').value.trim();
+        const alias = document.getElementById('projectAlias').value.trim();
         const tagsStr = document.getElementById('remarkTags').value.trim();
         const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(t => t) : [];
         
         const key = this.getRemarkKey(type, id);
         
-        if (content) {
+        if (content || alias) {
             this.remarks[key] = {
                 content,
+                alias,
                 tags,
                 updatedAt: new Date().toISOString(),
                 type,
@@ -2827,7 +3129,7 @@ class CloudflareManager {
                 name: name || id  // 保存名称，如果没有则使用 id
             };
         } else {
-            // 如果内容为空，删除备注
+            // 如果内容和别名都为空，删除备注
             delete this.remarks[key];
         }
         
@@ -2990,8 +3292,8 @@ class CloudflareManager {
                     ? new Date(remark.updatedAt).toLocaleString('zh-CN')
                     : '';
                 
-                // 使用 name 显示，如果没有则回退到 id
-                const displayName = remark.name || remark.id;
+                // 优先级: 别名 > 原始名称 > ID
+                const displayName = remark.alias || remark.name || remark.id;
                 
                 item.innerHTML = `
                     <div class="remark-item-header">

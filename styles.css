@@ -612,6 +612,26 @@ body {
   color: white;
 }
 
+.deploy-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.worker-actions .deploy-btn:hover {
+  background: #9b59b6; /* 紫色代表部署 */
+  border-color: #9b59b6;
+  color: white;
+}
+
 /* =====================================================
    Pages Section - Pages 列表
    ===================================================== */
@@ -747,6 +767,12 @@ body {
 .page-actions a:hover {
   background: var(--info);
   border-color: var(--info);
+  color: white;
+}
+
+.page-actions .deploy-btn:hover {
+  background: #3498db; /* 蓝色代表 Pages 部署 */
+  border-color: #3498db;
   color: white;
 }
 
@@ -2813,4 +2839,113 @@ textarea::placeholder {
 
 .zone-name {
     margin-right: 4px;
+}
+
+.form-help {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+#deployModal .modal-content {
+  max-width: 550px;
+}
+
+#workerScriptContent {
+  min-height: 250px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+}
+
+.delete-btn:hover {
+  background: rgba(248, 81, 73, 0.2) !important;
+  color: #F85149 !important;
+  border-color: rgba(248, 81, 73, 0.5) !important;
+}
+
+.worker-url-btn, .page-url-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: all var(--transition-fast);
+  text-decoration: none;
+}
+
+.worker-url-btn:hover, .page-url-btn:hover {
+  background: var(--bg-input);
+  color: var(--primary);
+}
+
+.edit-alias-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  margin-left: 4px;
+  opacity: 0.6;
+}
+
+.edit-alias-btn:hover {
+  background: var(--bg-input);
+  color: var(--primary);
+  opacity: 1;
+}
+
+.resource-id-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  padding: 0 4px;
+  border-radius: 4px;
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worker-name-row, .page-name-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.worker-name-link, .page-name-link {
+    text-decoration: none;
+    color: inherit;
+    transition: color 0.2s;
+    cursor: pointer;
+}
+
+.worker-name-link:hover .worker-name, 
+.page-name-link:hover .page-name {
+    color: var(--primary);
+    text-decoration: underline;
+}
+
+.cloudflare-rename-section {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  margin: 10px 0;
+}
+
+.rename-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 0;
 }

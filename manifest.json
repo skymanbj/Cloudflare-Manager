@@ -13,7 +13,8 @@
   "description": "专业的 Cloudflare DNS 记录管理工具。支持多账户、批量操作、数据导出、资源备注。",
   "host_permissions": [
     "https://api.cloudflare.com/*",
-    "https://api.github.com/*"
+    "https://api.github.com/*",
+    "https://dash.cloudflare.com/*"
   ],
   "icons": {
     "128": "icons/icon128.png",
@@ -27,7 +28,15 @@
     "storage",
     "unlimitedStorage",
     "downloads",
-    "alarms"
+    "alarms",
+    "scripting"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://dash.cloudflare.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
   ],
   "version": "2.2.0"
 }
