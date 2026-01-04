@@ -254,6 +254,7 @@
 
             <!-- DNS 记录表单 -->
             <div id="recordForm" class="record-form" style="display: none;">
+                <h3 id="recordFormTitle" class="form-title">添加 DNS 记录</h3>
                 <div class="form-group">
                     <label for="recordZone">域名</label>
                     <select id="recordZone" class="select-input"></select>
@@ -279,6 +280,12 @@
                 <div class="form-group">
                     <label for="recordContent">内容</label>
                     <input type="text" id="recordContent" class="text-input" placeholder="例如: 192.168.1.1">
+                </div>
+                <div class="form-row" id="recordPriorityRow" style="display: none;">
+                    <div class="form-group">
+                        <label for="recordPriority">优先级 (MX/SRV)</label>
+                        <input type="number" id="recordPriority" class="text-input" placeholder="例如: 10" min="0" max="65535">
+                    </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">

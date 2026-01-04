@@ -1059,6 +1059,7 @@ class CloudflareManager {
         document.getElementById('addRecordBtn').addEventListener('click', () => this.showRecordForm());
         document.getElementById('cancelRecordBtn').addEventListener('click', () => this.hideRecordForm());
         document.getElementById('saveRecordBtn').addEventListener('click', () => this.saveRecord());
+        document.getElementById('recordType').addEventListener('change', (e) => this.handleRecordTypeChange(e.target.value));
 
         // Toggle all zones
         document.getElementById('toggleAllBtn').addEventListener('click', () => this.toggleAllZones());
@@ -1936,7 +1937,10 @@ class CloudflareManager {
         this.editingZoneId = null;
         this.clearRecordForm();
         this.renderZoneSelector();
-        document.getElementById('recordForm').style.display = 'block';
+        const formEl = document.getElementById('recordForm');
+        document.getElementById('recordFormTitle').textContent = '添加 DNS 记录';
+        formEl.style.display = 'block';
+        this.handleRecordTypeChange('A');
     }
 
     hideRecordForm() {
@@ -1962,8 +1966,27 @@ class CloudflareManager {
         document.getElementById('recordContent').value = '';
         document.getElementById('recordTTL').value = '1';
         document.getElementById('recordProxied').checked = false;
+        const priorityInput = document.getElementById('recordPriority');
+        if (priorityInput) priorityInput.value = '';
         this.editingRecordId = null;
         this.editingZoneId = null;
+    }
+
+    handleRecordTypeChange(type) {
+        const priorityRow = document.getElementById('recordPriorityRow');
+        const proxiedGroup = document.getElementById('recordProxied').closest('.form-group');
+        
+        if (type === 'MX' || type === 'SRV') {
+            priorityRow.style.display = 'flex';
+        } else {
+            priorityRow.style.display = 'none';
+        }
+        
+        // CNAME, A, AAAA usually support proxy. MX, TXT, NS, SRV don't.
+        const canProxy = ['A', 'AAAA', 'CNAME'].includes(type);
+        if (proxiedGroup) {
+            proxiedGroup.style.display = canProxy ? 'block' : 'none';
+        }
     }
 
     editRecord(record) {
@@ -1974,7 +1997,7 @@ class CloudflareManager {
         this.renderZoneSelector();
         
         const formEl = document.getElementById('recordForm');
-        console.log('Record form element:', formEl);
+        document.getElementById('recordFormTitle').textContent = '编辑 DNS 记录';
         
         document.getElementById('recordZone').value = record.zoneId;
         document.getElementById('recordType').value = record.type;
@@ -1983,9 +2006,14 @@ class CloudflareManager {
         document.getElementById('recordTTL').value = record.ttl.toString();
         document.getElementById('recordProxied').checked = record.proxied;
         
-        formEl.style.display = 'block';
-        console.log('Record form display set to block');
+        const priorityInput = document.getElementById('recordPriority');
+        if (priorityInput) {
+            priorityInput.value = record.priority !== undefined ? record.priority : '';
+        }
         
+        this.handleRecordTypeChange(record.type);
+        
+        formEl.style.display = 'block';
         // 滚动到表单位置
         formEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -1997,6 +2025,8 @@ class CloudflareManager {
         const content = document.getElementById('recordContent').value.trim();
         const ttl = parseInt(document.getElementById('recordTTL').value);
         const proxied = document.getElementById('recordProxied').checked;
+        const priorityInput = document.getElementById('recordPriority');
+        const priority = (type === 'MX' || type === 'SRV') ? parseInt(priorityInput.value) : undefined;
         
         if (!zoneId || !name || !content) {
             this.showToast('请填写完整信息', 'warning');
@@ -2015,7 +2045,17 @@ class CloudflareManager {
             name = name === '@' ? zone.name : `${name}.${zone.name}`;
         }
         
-        const recordData = { type, name, content, ttl, proxied };
+        const recordData = { type, name, content, ttl };
+        
+        // Only include proxied if it's supported by the record type
+        if (['A', 'AAAA', 'CNAME'].includes(type)) {
+            recordData.proxied = proxied;
+        }
+        
+        // Include priority for MX and SRV
+        if (priority !== undefined && !isNaN(priority)) {
+            recordData.priority = priority;
+        }
         
         try {
             this.showLoading();
