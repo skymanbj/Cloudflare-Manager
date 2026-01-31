@@ -441,6 +441,7 @@ class CloudflareManager {
         this.workersSearchQuery = '';
         this.pagesSearchQuery = '';
         this.collapsedZones = new Set(); // 存储折叠的域名
+        this.collapsedRemarkGroups = new Set(); // 存储折叠的备注分组
 
         // 加载状态位
         this.isLoadingZones = false;
@@ -3406,14 +3407,33 @@ class CloudflareManager {
         };
 
         Object.entries(grouped).forEach(([type, remarks]) => {
+            const isCollapsed = this.collapsedRemarkGroups.has(type);
             const groupDiv = document.createElement('div');
-            groupDiv.className = 'remarks-group';
+            groupDiv.className = `remarks-group ${isCollapsed ? 'collapsed' : ''}`;
             groupDiv.innerHTML = `
-                <div class="remarks-group-header">
-                    <span class="remarks-group-title">${typeLabels[type] || type}</span>
-                    <span class="remarks-group-count">${remarks.length}</span>
+                <div class="remarks-group-header" data-type="${type}">
+                    <div class="remarks-group-header-left">
+                        <span class="remarks-group-toggle">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </span>
+                        <span class="remarks-group-title">${typeLabels[type] || type}</span>
+                    </div>
+                    <span class="remarks-group-count">${remarks.length} 条</span>
                 </div>
             `;
+
+            // 绑定分组点击折叠事件
+            groupDiv.querySelector('.remarks-group-header').addEventListener('click', () => {
+                if (this.collapsedRemarkGroups.has(type)) {
+                    this.collapsedRemarkGroups.delete(type);
+                    groupDiv.classList.remove('collapsed');
+                } else {
+                    this.collapsedRemarkGroups.add(type);
+                    groupDiv.classList.add('collapsed');
+                }
+            });
 
             const listDiv = document.createElement('div');
             listDiv.className = 'remarks-group-list';
@@ -3507,6 +3527,11 @@ class CloudflareManager {
                     }
                 }
 
+                const renderedContent = typeof marked !== 'undefined' ? marked.parse(remark.content) : this.escapeHtml(remark.content);
+                // 判断内容是否过长（字符数 > 300 或 行数 > 8）
+                const lineCount = (remark.content.match(/\n/g) || []).length + 1;
+                const isLong = remark.content.length > 400 || lineCount > 10;
+
                 item.innerHTML = `
                     <div class="remark-item-header" style="display: flex !important; justify-content: space-between !important; align-items: flex-start !important; gap: 10px !important; margin-bottom: 8px !important;">
                         <div class="remark-item-title-row" style="flex: 1 !important; display: flex !important; align-items: center !important; flex-wrap: wrap !important; gap: 4px !important;">
@@ -3515,13 +3540,33 @@ class CloudflareManager {
                         </div>
                         <span class="remark-item-date" style="white-space: nowrap !important; font-size: 11px !important; opacity: 0.6 !important;">${dateStr}</span>
                     </div>
-                    <div class="remark-item-content markdown-body">${typeof marked !== 'undefined' ? marked.parse(remark.content) : this.escapeHtml(remark.content)}</div>
+                    <div class="remark-item-content markdown-body ${isLong ? 'foldable' : ''}">${renderedContent}</div>
+                    ${isLong ? `
+                        <div class="remark-content-toggle">
+                            <span>展开全部</span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </div>
+                    ` : ''}
                     ${tagsHtml}
                     <div class="remark-item-actions">
                         <button class="btn-sm btn-secondary" data-action="edit">编辑</button>
                         <button class="btn-sm btn-danger" data-action="delete">删除</button>
                     </div>
                 `;
+
+                // 绑定内容折叠切换事件
+                if (isLong) {
+                    const contentEl = item.querySelector('.remark-item-content');
+                    const toggleEl = item.querySelector('.remark-content-toggle');
+                    toggleEl.addEventListener('click', () => {
+                        const isExpanded = contentEl.classList.toggle('expanded');
+                        contentEl.classList.toggle('foldable', !isExpanded);
+                        toggleEl.querySelector('span').textContent = isExpanded ? '收起内容' : '展开全部';
+                        toggleEl.querySelector('svg').style.transform = isExpanded ? 'rotate(180deg)' : '';
+                    });
+                }
 
                 item.querySelector('[data-action="edit"]').addEventListener('click', () => {
                     this.openRemarkModal(remark.type, remark.id, displayName, '');
