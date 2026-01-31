@@ -3079,47 +3079,53 @@ class CloudflareManager {
     }
 
     openRemarkModal(type, id, name, detail) {
-        this.currentRemarkTarget = { type, id, name, detail };
-
-        // 设置弹窗标题和目标信息
-        const typeLabels = {
-            'zone': '域名',
-            'dns': 'DNS 记录',
-            'worker': 'Worker',
-            'page': 'Page'
-        };
-
-        document.getElementById('remarkModalTitle').textContent =
-            this.hasRemark(type, id) ? '编辑备注' : '添加备注';
-
-        // 查找账号信息
-        let accountInfoHtml = '';
+        // 1. 查找账号信息（从内存资源池匹配）
         let accountName = '';
         let accountId = '';
 
         if (type === 'zone' || type === 'dns') {
-            const zone = this.zones.find(z => z.id === (type === 'zone' ? id : this.currentRemarkTarget.zoneId));
+            const targetZoneId = type === 'zone' ? id : (this.currentRemarkTarget?.zoneId || id);
+            const zone = this.zones.find(z => z.id === targetZoneId);
             if (zone && zone.account) {
                 accountName = zone.account.name;
                 accountId = zone.account.id;
             }
         } else if (type === 'worker') {
-            const worker = this.workers.find(w => w.id === id);
+            const searchId = (id || '').toLowerCase().trim();
+            const worker = this.workers.find(w => (w.id || '').toLowerCase() === searchId);
             if (worker && worker.account) {
                 accountName = worker.account.name;
                 accountId = worker.account.id;
             }
         } else if (type === 'page') {
-            const page = this.pages.find(p => p.name === id);
+            const searchId = (id || '').toLowerCase().trim();
+            const page = this.pages.find(p => (p.name || '').toLowerCase() === searchId);
             if (page && page.account) {
                 accountName = page.account.name;
                 accountId = page.account.id;
             }
         }
 
-        if (accountName) {
-            const colorClass = this.getAccountColorClass(accountId);
-            accountInfoHtml = `<span class="account-tag ${colorClass}" style="margin-left: 8px; vertical-align: middle;">${this.escapeHtml(accountName)}</span>`;
+        // 2. 锁定目标及其所属账户信息（用于后续持久化）
+        this.currentRemarkTarget = { 
+            type, 
+            id, 
+            name, 
+            detail,
+            accountId: accountId || this.currentAccount?.id || null,
+            accountName: accountName || this.currentAccount?.name || '未知账号'
+        };
+
+        // 设置弹窗标题
+        const typeLabels = { 'zone': '域名', 'dns': 'DNS 记录', 'worker': 'Worker', 'page': 'Page' };
+        document.getElementById('remarkModalTitle').textContent =
+            this.hasRemark(type, id) ? '编辑备注' : '添加备注';
+
+        // 设置账户标签 HTML
+        let accountInfoHtml = '';
+        if (this.currentRemarkTarget.accountName && this.currentRemarkTarget.accountName !== '未知账号') {
+            const colorClass = this.getAccountColorClass(this.currentRemarkTarget.accountId);
+            accountInfoHtml = `<span class="account-tag ${colorClass}" style="margin-left: 8px; vertical-align: middle;">${this.escapeHtml(this.currentRemarkTarget.accountName)}</span>`;
         }
 
         document.getElementById('remarkTargetInfo').innerHTML = `
@@ -3137,7 +3143,7 @@ class CloudflareManager {
         document.getElementById('remarkTags').value = existingRemark?.tags?.join(', ') || '';
         document.getElementById('projectAlias').value = existingRemark?.alias || '';
 
-        // 显示/隐藏 Cloudflare 直接更名选项 (已简化为仅根据类型显示/隐藏容器)
+        // 显示/隐藏 Cloudflare 直接更名选项
         const renameSection = document.getElementById('cloudflareRenameSection');
         if (renameSection) {
             renameSection.style.display = (type === 'worker' || type === 'page') ? 'block' : 'none';
@@ -3159,10 +3165,8 @@ class CloudflareManager {
             toggleBtn.classList.remove('active');
         }
 
-        // 显示弹窗
+        // 显示弹窗并聚焦
         document.getElementById('remarkModal').style.display = 'flex';
-
-        // 聚焦到内容输入框
         setTimeout(() => {
             document.getElementById('remarkContent').focus();
         }, 100);
@@ -3203,9 +3207,9 @@ class CloudflareManager {
                 updatedAt: new Date().toISOString(),
                 type,
                 id,
-                name: name || id,  // 保存名称，如果没有则使用 id
-                accountId: this.currentAccount?.id || null,
-                accountName: this.currentAccount?.name || '未知账号'
+                name: name || id,
+                accountId: this.currentRemarkTarget.accountId,
+                accountName: this.currentRemarkTarget.accountName
             };
         } else {
             // 如果内容和别名都为空，删除备注
@@ -3350,10 +3354,10 @@ class CloudflareManager {
             this.remarksRetryCount = 0;
         }
 
-        // 将 remarks 对象转换为数组
+        // 将 remarks 对象转换为数组，并进行实时账户关联补全
         const remarksArray = Object.entries(this.remarks)
             .map(([key, value]) => {
-                // 存量数据补全：如果缺失 type 或 id，从 key (format: "type:id") 中解析
+                // 1. 存量数据解析：如果缺失 type 或 id，从 key (format: "type:id") 中解析
                 if (!value.type || !value.id) {
                     const parts = key.split(':');
                     if (parts.length >= 2) {
@@ -3361,6 +3365,33 @@ class CloudflareManager {
                         value.id = value.id || parts.slice(1).join(':');
                     }
                 }
+
+                // 2. 实时资源匹配补全 accountId (关键：供跨账户过滤使用)
+                if (!value.accountId || value.accountId === 'unknown') {
+                    if (value.type === 'zone' || value.type === 'dns') {
+                        const targetId = value.type === 'zone' ? value.id : value.zoneId;
+                        const zone = this.zones.find(z => z.id === targetId);
+                        if (zone && zone.account) {
+                            value.accountId = zone.account.id;
+                            value.accountName = zone.account.name;
+                        }
+                    } else if (value.type === 'worker') {
+                        const searchId = (value.id || '').toLowerCase().trim();
+                        const worker = this.workers.find(w => (w.id || '').toLowerCase() === searchId);
+                        if (worker && worker.account) {
+                            value.accountId = worker.account.id;
+                            value.accountName = worker.account.name;
+                        }
+                    } else if (value.type === 'page') {
+                        const searchId = (value.id || '').toLowerCase().trim();
+                        const page = this.pages.find(p => (p.id || '').toLowerCase() === searchId);
+                        if (page && page.account) {
+                            value.accountId = page.account.id;
+                            value.accountName = page.account.name;
+                        }
+                    }
+                }
+
                 return {
                     key,
                     ...value
@@ -3374,15 +3405,15 @@ class CloudflareManager {
         // 应用过滤
         const filtered = this.getFilteredRemarks(remarksArray);
 
-        // 更新统计
-        this.updateRemarksStats(remarksArray);
+        // 更新统计 (仅统计当前可见的备注)
+        this.updateRemarksStats(filtered);
 
-        // 更新笔记统计卡片
+        // 更新总数统计卡片 (反映当前可见数量)
         const notesStatCard = document.getElementById('notesStatCard');
         if (notesStatCard) {
             const statNumberEl = notesStatCard.querySelector('.stat-number');
             if (statNumberEl) {
-                statNumberEl.textContent = remarksArray.length + ' 条备注';
+                statNumberEl.textContent = filtered.length + ' 条备注';
             }
         }
 
@@ -3600,6 +3631,8 @@ class CloudflareManager {
      */
     getFilteredRemarks(remarksArray) {
         return remarksArray.filter(remark => {
+            // 已取消账户隔离：所有账户下均显示全部备注
+            
             // 类型过滤
             if (this.remarksTypeFilter && remark.type !== this.remarksTypeFilter) {
                 return false;
