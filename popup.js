@@ -483,9 +483,46 @@ class CloudflareManager {
         this.init();
     }
 
+    async loadResourceCache() {
+        if (!this.currentAccount?.id) return;
+        const cacheKey = `resourceCache_${this.currentAccount.id}`;
+        return new Promise((resolve) => {
+            chrome.storage.local.get([cacheKey], (result) => {
+                const cache = result[cacheKey] || {};
+                if (cache.zones) this.zones = cache.zones;
+                if (cache.workers) this.workers = cache.workers;
+                if (cache.pages) this.pages = cache.pages;
+                if (cache.allRecords) this.allRecords = cache.allRecords;
+                console.log(`[Cache] Loaded resource cache for account: ${this.currentAccount.name}`);
+                resolve();
+            });
+        });
+    }
+
+    async saveResourceCache() {
+        if (!this.currentAccount?.id) return;
+        const cacheKey = `resourceCache_${this.currentAccount.id}`;
+        return new Promise((resolve) => {
+            const cache = {
+                zones: this.zones,
+                workers: this.workers,
+                pages: this.pages,
+                allRecords: this.allRecords,
+                timestamp: Date.now()
+            };
+            const data = {};
+            data[cacheKey] = cache;
+            chrome.storage.local.set(data, () => {
+                console.log(`[Cache] Resource cache saved for account: ${this.currentAccount.name}`);
+                resolve();
+            });
+        });
+    }
+
     async init() {
         await this.loadAccounts();
         await this.loadRemarks();
+        await this.loadResourceCache(); // 启动时立即恢复缓存，实现秒开
         await this.githubSync.loadConfig();
         this.configMarked();
         this.bindEvents();
@@ -617,7 +654,13 @@ class CloudflareManager {
             chrome.storage.local.set({
                 accounts: this.accounts,
                 currentAccountId: this.currentAccount?.id || null
-            }, resolve);
+            }, () => {
+                // 如果切换了账户，重置加载状态但保留缓存，实现快速切换
+                this.isLoadingZones = false;
+                this.isLoadingWorkers = false;
+                this.isLoadingPages = false;
+                resolve();
+            });
         });
     }
 
@@ -757,18 +800,36 @@ class CloudflareManager {
     async getAccountId() {
         if (this.accountId) return this.accountId;
 
-        // 1. 尝试通过 /accounts API 获取，并尝试匹配当前账户名称
+        // 1. 优先尝试从 zones 获取，因为这是最快且最可靠的相关账户
+        if (this.zones && this.zones.length > 0) {
+            const currentName = (this.currentAccount?.name || '').toLowerCase();
+            const matchedZone = this.zones.find(z =>
+                z.account && (z.account.name.toLowerCase().includes(currentName) || currentName.includes(z.account.name.toLowerCase()))
+            );
+
+            if (matchedZone) {
+                this.accountId = matchedZone.account.id;
+                return this.accountId;
+            }
+            
+            // 如果没找到名称匹配的，但有 zones，说明至少能拿到一个有效的 accountId
+            if (this.zones[0].account?.id) {
+                this.accountId = this.zones[0].account.id;
+                return this.accountId;
+            }
+        }
+
+        // 2. 尝试通过 /accounts API 获取
         try {
             const accounts = await this.apiRequest('/accounts?per_page=50');
             if (accounts && accounts.length > 0) {
-                // 尝试找到名称包含当前账户名（或被当前账户名包含）的账户
                 const currentName = (this.currentAccount?.name || '').toLowerCase();
                 let matchedAccount = accounts.find(acc =>
                     acc.name.toLowerCase().includes(currentName) ||
                     currentName.includes(acc.name.toLowerCase())
                 );
 
-                // 如果是特定已知的超级管理员，优先匹配对应的邮箱
+                // 特殊匹配逻辑保留
                 if (currentName === 'liubohn69') {
                     const superMatch = accounts.find(acc => acc.name.toLowerCase().includes('liubohn69@gmail.com'));
                     if (superMatch) matchedAccount = superMatch;
@@ -779,8 +840,6 @@ class CloudflareManager {
                     return this.accountId;
                 }
 
-                // 如果没有匹配，默认取第一个，但优先避开 "hotmail account" 这种看起来像副号的（如果能区分的话）
-                // 暂时取第一个
                 this.accountId = accounts[0].id;
                 return this.accountId;
             }
@@ -788,124 +847,100 @@ class CloudflareManager {
             console.warn('无法通过 /accounts 获取账户 ID:', error);
         }
 
-        // 2. 如果 zones 已经加载，尝试从 zones 获取
-        // 注意：这可能不准确，因为 zones 可能混合了多个账户
-        if (this.zones && this.zones.length > 0 && this.zones[0].account) {
-            // 尝试在 zones 中寻找匹配的账户
-            const currentName = (this.currentAccount?.name || '').toLowerCase();
-            const matchedZone = this.zones.find(z =>
-                z.account && (z.account.name.toLowerCase().includes(currentName) || currentName.includes(z.account.name.toLowerCase()))
-            );
-
-            if (matchedZone) {
-                this.accountId = matchedZone.account.id;
-            } else {
-                this.accountId = this.zones[0].account.id;
-            }
-            return this.accountId;
-        }
-
-        // 3. 如果都失败，尝试加载 zones
-        if (this.zones.length === 0) {
+        // 3. 如果还是没有，尝试加载一次 zones (如果之前没加载过)
+        if (!this.zones || this.zones.length === 0) {
             try {
-                await this.loadZones();
-                if (this.zones.length > 0 && this.zones[0].account) {
-                    this.accountId = this.zones[0].account.id;
+                const zones = await this.loadZones();
+                if (zones && zones.length > 0 && zones[0].account) {
+                    this.accountId = zones[0].account.id;
                     return this.accountId;
                 }
             } catch (e) { /* ignore */ }
         }
 
-        // 如果还是获取不到，但我们有 currentAccount 对象且它是从存储中加载的，
-        // 这里的 currentAccount 是我们自己存储的结构 {id, name, token}，id 是 uuid
-        // 并不是 Cloudflare 的 account_tag。
-
-        throw new Error('无法获取账户 ID，请确保 API Token 有正确的权限');
+        // 如果真的什么都拿不到，返回 null 而不是抛错，由调用方决定如何处理
+        console.warn('未能自动获取 Account ID');
+        return null;
     }
 
     async loadWorkers() {
         this.isLoadingWorkers = true;
-        // 放宽判定：只要包含核心名称或邮箱就开启全量扫描
-        const currentName = ((this.currentAccount && this.currentAccount.name) || '').toLowerCase().trim();
-        const isSuperAdmin = currentName.includes('liubohn69');
-
-        console.log(`[Workers] Loading workers. Mode: ${isSuperAdmin ? 'Full-Account-Scan' : 'Current-Account-Only'} (${currentName})`);
+        
+        // 开启全量扫描模式：不再仅限于特定超级管理员，让所有用户都能更完整地加载资源
+        console.log(`[Workers] Loading workers using Deep-Scan mode...`);
 
         try {
-            if (isSuperAdmin) {
-                // Collect accounts from multiple sources to be robust
-                const uniqueAccounts = new Map();
+            // Collect accounts from multiple sources to be robust
+            const uniqueAccounts = new Map();
 
-                // 1. Current Account
+            // 1. Current Account (Targeted)
+            try {
                 const currentId = await this.getAccountId();
                 if (currentId) {
-                    uniqueAccounts.set(currentId, { id: currentId, name: this.currentAccount.name });
+                    uniqueAccounts.set(currentId, { id: currentId, name: this.currentAccount?.name || 'Primary' });
                 }
+            } catch (e) { console.warn('Failed to get account ID via target method:', e); }
 
-                // 2. From /accounts API
-                try {
-                    const apiAccounts = await this.apiRequest('/accounts?per_page=50');
-                    if (Array.isArray(apiAccounts)) {
-                        apiAccounts.forEach(acc => {
-                            uniqueAccounts.set(acc.id, { id: acc.id, name: acc.name });
-                        });
-                    }
-                } catch (e) {
-                    console.warn('Failed to fetch /accounts for workers:', e);
-                }
-
-                // 3. From Zones (Discovery via domains)
-                if (this.zones && this.zones.length > 0) {
-                    this.zones.forEach(z => {
-                        if (z.account && z.account.id) {
-                            if (!uniqueAccounts.has(z.account.id)) {
-                                uniqueAccounts.set(z.account.id, {
-                                    id: z.account.id,
-                                    name: z.account.name
-                                });
-                            }
-                        }
+            // 2. From /accounts API (Breadth-first)
+            try {
+                const apiAccounts = await this.apiRequest('/accounts?per_page=50');
+                if (Array.isArray(apiAccounts)) {
+                    apiAccounts.forEach(acc => {
+                        uniqueAccounts.set(acc.id, { id: acc.id, name: acc.name });
                     });
                 }
+            } catch (e) {
+                console.warn('Failed to fetch /accounts for workers:', e);
+            }
 
-                const allAccounts = Array.from(uniqueAccounts.values());
-                console.log(`Scanning ${allAccounts.length} accounts for Workers`);
-
-                // Parallel fetch
-                const promises = allAccounts.map(async account => {
-                    try {
-                        const response = await this.apiRequest(`/accounts/${account.id}/workers/scripts`);
-                        return (response || []).map(worker => ({
-                            ...worker,
-                            account: {
-                                id: account.id,
-                                name: account.name
-                            }
-                        }));
-                    } catch (err) {
-                        console.warn(`Failed to fetch workers for account ${account.name} (${account.id}):`, err);
-                        return [];
+            // 3. From Zones (Discovery via existing domains)
+            if (this.zones && this.zones.length > 0) {
+                this.zones.forEach(z => {
+                    if (z.account && z.account.id) {
+                        if (!uniqueAccounts.has(z.account.id)) {
+                            uniqueAccounts.set(z.account.id, {
+                                id: z.account.id,
+                                name: z.account.name
+                            });
+                        }
                     }
                 });
+            }
 
-                const results = await Promise.all(promises);
-                this.workers = results.flat();
-                console.log(`[Workers] Total workers loaded: ${this.workers.length} from ${allAccounts.length} accounts.`);
-                results.forEach((res, i) => {
-                    if (res.length > 0) console.log(`  - Account "${allAccounts[i].name}": ${res.length} workers`);
-                });
+            const allAccounts = Array.from(uniqueAccounts.values());
+            
+            if (allAccounts.length === 0) {
+                throw new Error('无法发现任何 Cloudflare 账户。请检查 API Token 权限（需要 Account.Workers Scripts 权限）。');
+            }
 
-            } else {
-                // Standard fetch
-                const accountId = await this.getAccountId();
-                const response = await this.apiRequest(`/accounts/${accountId}/workers/scripts`);
-                this.workers = (response || []).map(worker => ({
-                    ...worker,
-                    account: {
-                        id: accountId,
-                        name: this.currentAccount ? this.currentAccount.name : 'Unknown'
-                    }
-                }));
+            console.log(`Scanning ${allAccounts.length} accounts for Workers`);
+
+            // Parallel fetch
+            const promises = allAccounts.map(async account => {
+                try {
+                    const response = await this.apiRequest(`/accounts/${account.id}/workers/scripts`);
+                    return (response || []).map(worker => ({
+                        ...worker,
+                        account: {
+                            id: account.id,
+                            name: account.name
+                        }
+                    }));
+                } catch (err) {
+                    console.warn(`Failed to fetch workers for account ${account.name} (${account.id}):`, err);
+                    return [];
+                }
+            });
+
+            const results = await Promise.all(promises);
+            this.workers = results.flat();
+            console.log(`[Workers] Total workers loaded: ${this.workers.length} from ${allAccounts.length} accounts.`);
+
+            await this.saveResourceCache(); // 保存缓存
+
+            // 异步补全：如果当前正在查看备注页，触发重绘
+            if (this.currentTab === 'notes') {
+                this.loadRemarksAndRender();
             }
 
             // Sort: Account Name -> Worker ID
@@ -950,87 +985,80 @@ class CloudflareManager {
     // Pages API Methods
     async loadPages() {
         this.isLoadingPages = true;
-        // 放宽判定：同上
-        const currentName = ((this.currentAccount && this.currentAccount.name) || '').toLowerCase().trim();
-        const isSuperAdmin = currentName.includes('liubohn69');
-
-        console.log(`[Pages] Loading pages. Mode: ${isSuperAdmin ? 'Full-Account-Scan' : 'Current-Account-Only'} (${currentName})`);
+        console.log(`[Pages] Loading pages using Deep-Scan mode...`);
 
         try {
-            if (isSuperAdmin) {
-                // Collect accounts from multiple sources
-                const uniqueAccounts = new Map();
+            // Collect accounts from multiple sources
+            const uniqueAccounts = new Map();
 
-                // 1. Current Account
+            // 1. Current Account
+            try {
                 const currentId = await this.getAccountId();
                 if (currentId) {
-                    uniqueAccounts.set(currentId, { id: currentId, name: this.currentAccount.name });
+                    uniqueAccounts.set(currentId, { id: currentId, name: this.currentAccount?.name || 'Primary' });
                 }
+            } catch (e) { }
 
-                // 2. From /accounts API
-                try {
-                    const apiAccounts = await this.apiRequest('/accounts?per_page=50');
-                    if (Array.isArray(apiAccounts)) {
-                        apiAccounts.forEach(acc => {
-                            uniqueAccounts.set(acc.id, { id: acc.id, name: acc.name });
-                        });
-                    }
-                } catch (e) {
-                    console.warn('Failed to fetch /accounts for pages:', e);
-                }
-
-                // 3. From Zones
-                if (this.zones && this.zones.length > 0) {
-                    this.zones.forEach(z => {
-                        if (z.account && z.account.id) {
-                            if (!uniqueAccounts.has(z.account.id)) {
-                                uniqueAccounts.set(z.account.id, {
-                                    id: z.account.id,
-                                    name: z.account.name
-                                });
-                            }
-                        }
+            // 2. From /accounts API
+            try {
+                const apiAccounts = await this.apiRequest('/accounts?per_page=50');
+                if (Array.isArray(apiAccounts)) {
+                    apiAccounts.forEach(acc => {
+                        uniqueAccounts.set(acc.id, { id: acc.id, name: acc.name });
                     });
                 }
+            } catch (e) {
+                console.warn('Failed to fetch /accounts for pages:', e);
+            }
 
-                const allAccounts = Array.from(uniqueAccounts.values());
-                console.log(`Scanning ${allAccounts.length} accounts for Pages`);
-
-                // Parallel fetch
-                const promises = allAccounts.map(async account => {
-                    try {
-                        const response = await this.apiRequest(`/accounts/${account.id}/pages/projects`);
-                        return (response || []).map(page => ({
-                            ...page,
-                            account: {
-                                id: account.id,
-                                name: account.name
-                            }
-                        }));
-                    } catch (err) {
-                        console.warn(`Failed to fetch pages for account ${account.name} (${account.id}):`, err);
-                        return [];
+            // 3. From Zones
+            if (this.zones && this.zones.length > 0) {
+                this.zones.forEach(z => {
+                    if (z.account && z.account.id) {
+                        if (!uniqueAccounts.has(z.account.id)) {
+                            uniqueAccounts.set(z.account.id, {
+                                id: z.account.id,
+                                name: z.account.name
+                            });
+                        }
                     }
                 });
+            }
 
-                const results = await Promise.all(promises);
-                this.pages = results.flat();
-                console.log(`[Pages] Total pages loaded: ${this.pages.length} from ${allAccounts.length} accounts.`);
-                results.forEach((res, i) => {
-                    if (res.length > 0) console.log(`  - Account "${allAccounts[i].name}": ${res.length} projects`);
-                });
+            const allAccounts = Array.from(uniqueAccounts.values());
+            
+            if (allAccounts.length === 0) {
+                 throw new Error('无法发现任何 Cloudflare 账户。请检查 API Token 权限（需要 Account.Cloudflare Pages 权限）。');
+            }
+            
+            console.log(`Scanning ${allAccounts.length} accounts for Pages`);
 
-            } else {
-                // Standard fetch
-                const accountId = await this.getAccountId();
-                const response = await this.apiRequest(`/accounts/${accountId}/pages/projects`);
-                this.pages = (response || []).map(page => ({
-                    ...page,
-                    account: {
-                        id: accountId,
-                        name: this.currentAccount ? this.currentAccount.name : 'Unknown'
-                    }
-                }));
+            // Parallel fetch
+            const promises = allAccounts.map(async account => {
+                try {
+                    const response = await this.apiRequest(`/accounts/${account.id}/pages/projects`);
+                    return (response || []).map(page => ({
+                        ...page,
+                        account: {
+                            id: account.id,
+                            name: account.name
+                        }
+                    }));
+                } catch (err) {
+                    console.warn(`Failed to fetch pages for account ${account.name} (${account.id}):`, err);
+                    return [];
+                }
+            });
+
+            const results = await Promise.all(promises);
+            this.pages = results.flat();
+            console.log(`[Pages] Total pages loaded: ${this.pages.length} from ${allAccounts.length} accounts.`);
+
+            await this.saveResourceCache(); // 保存缓存
+
+            // 异步补全
+            if (this.currentTab === 'notes') {
+                this.loadRemarksAndRender();
             }
 
             // Sort: Account Name -> Page Name
@@ -1321,11 +1349,19 @@ class CloudflareManager {
         }
 
         // Load data if needed
-        if (tab === 'workers' && this.workers.length === 0) {
-            this.loadWorkersAndRender();
+        if (tab === 'workers') {
+            if (this.workers.length === 0) {
+                this.loadWorkersAndRender();
+            } else {
+                this.renderWorkers();
+            }
         }
-        if (tab === 'pages' && this.pages.length === 0) {
-            this.loadPagesAndRender();
+        if (tab === 'pages') {
+            if (this.pages.length === 0) {
+                this.loadPagesAndRender();
+            } else {
+                this.renderPages();
+            }
         }
         if (tab === 'notes') {
             this.loadRemarksAndRender();
@@ -1472,65 +1508,65 @@ class CloudflareManager {
         const recordsList = document.getElementById('recordsList');
 
         try {
-            this.showLoading();
+            // 1. 瞬间呈现：显示 Tab 布局，不使用 showLoading() 遮罩阻断用户操作
+            tabsSection.style.display = 'block';
+            dnsSection.style.display = 'block';
+            
+            // 2. 局部加载状态：仅在列表区显示加载，不卡死全局
+            if (this.allRecords.length === 0) {
+                recordsList.innerHTML = '<div class="loading">正在加载缓存记录...</div>';
+            }
 
-            // 重置状态
-            // 重置所有数据状态
+            // 3. 智能重置：保留全局资源（Workers/Pages），仅重置当前账户相关的 DNS 状态
             this.selectedZoneId = '';
             this.searchQuery = '';
-            this.workers = [];
-            this.pages = [];
-            this.zones = [];
-            this.allRecords = [];
-            this.accountId = null;
+            // 不再重置 this.workers = []; 和 this.pages = []; 确保备注页秒开
 
-            // 重置搜索框
+            // 4. 重置搜索 UI
             document.getElementById('searchInput').value = '';
             document.getElementById('clearSearchBtn').style.display = 'none';
 
-            // 立即清空界面列表，防止残留
-            document.getElementById('recordsList').innerHTML = '';
-            const workersList = document.querySelector('.workers-list');
-            if (workersList) workersList.innerHTML = '';
+            // 5. 重要：切换账户时必须彻底清除旧账户的 Workers 和 Pages 状态，防止 UI 混淆
+            this.workers = [];
+            this.pages = [];
+            this.allRecords = [];
+            this.zones = [];
+            
+            // 尝试加载新账户的缓存
+            await this.loadResourceCache();
 
-            const pagesList = document.querySelector('.pages-list');
-            if (pagesList) pagesList.innerHTML = '';
-
-            const remarksList = document.getElementById('remarksList');
-            if (remarksList) remarksList.innerHTML = '';
-
-            // 加载所有域名
-            await this.loadZones();
-
-            // 显示标签页
-            tabsSection.style.display = 'block';
-
-            // 填充域名筛选器
+            // 6. 执行加载流程（后台执行，不阻塞 UI 渲染完成）
+            // 我们先渲染一次缓存数据
+            this.renderAllRecords();
             this.renderZoneFilter();
 
-            // 加载所有记录
-            dnsSection.style.display = 'block';
-            recordsList.innerHTML = '<div class="loading">正在加载所有 DNS 记录...</div>';
+            // 7. 异步刷新：在后台拉取最新数据
+            setTimeout(async () => {
+                try {
+                    console.log('[AccountSwitch] Background refreshing zones and records...');
+                    await this.loadZones();
+                    this.renderZoneFilter();
+                    
+                    await this.loadAllRecords();
+                    
+                    this.collapsedZones = new Set(this.zones.map(z => z.name));
+                    document.getElementById('recordCount').textContent = `${this.allRecords.length} 条记录`;
+                    
+                    this.updateNotesStatCard();
+                    this.renderAllRecords();
+                    this.updateHeaderAccountUI();
+                    
+                    await this.saveResourceCache();
+                } catch (e) {
+                    console.error('[AccountSwitch] Background refresh failed:', e);
+                }
+            }, 0);
 
-            await this.loadAllRecords();
-
-            // 默认折叠所有域名
-            this.collapsedZones = new Set(this.zones.map(z => z.name));
-
-            document.getElementById('recordCount').textContent = `${this.allRecords.length} 条记录`;
-
-            // 更新备注统计卡片
-            this.updateNotesStatCard();
-            this.renderAllRecords();
-            // 加载完成后再次更新头部颜色，确保获取到了真实的 Account ID
-            this.updateHeaderAccountUI();
-
-            this.hideLoading();
         } catch (error) {
-            this.hideLoading();
             this.showToast(error.message, 'error');
         }
     }
+
 
     // 获取账户颜色类名
     getAccountColorClass(accountId) {
@@ -1581,31 +1617,6 @@ class CloudflareManager {
             });
         }
 
-        // 如果最终没有要显示的域名
-        if (zonesToRender.length === 0) {
-            // ... (keep empty state logic but adapted) ...
-            if (this.searchQuery) {
-                list.innerHTML = `
-                    <div class="empty-state">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                            <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/>
-                            <path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="2"/>
-                        </svg>
-                        <p>未找到匹配 "${this.escapeHtml(this.searchQuery)}" 的域名或记录</p>
-                    </div>
-                `;
-            } else {
-                list.innerHTML = `
-                    <div class="empty-state">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                        <p>暂无域名</p>
-                    </div>
-                `;
-            }
-            return;
-        }
 
         // 如果有搜索关键词，显示搜索结果统计
         if (this.searchQuery) {
@@ -3311,19 +3322,16 @@ class CloudflareManager {
 
         if ((anyLoading || pendingData) && !this.remarksReloadRegistered && this.remarksRetryCount < this.remarksMaxRetries) {
             this.remarksRetryCount++;
-            console.log(`[Remarks] Data pending (Loading: ${anyLoading}, MissingPool: ${pendingData}). Scheduling reload #${this.remarksRetryCount}/${this.remarksMaxRetries}...`);
+            console.log(`[Remarks] Data pending. Scheduling background refresh #${this.remarksRetryCount}/${this.remarksMaxRetries}...`);
             this.remarksReloadRegistered = true;
             
-            // 只要还在等待重试，就显示加载状态并强制返回，避免显示部分不完整数据
-            remarksList.innerHTML = '<div class="loading">正在全量拉取各账号资源数据，请稍候... (尝试次数: ' + this.remarksRetryCount + ')</div>';
-            
+            // 下发异步轮询，但不 return，让列表先显示出来
             setTimeout(() => {
                 this.remarksReloadRegistered = false;
-                if (this.currentTab === 'remarks') {
+                if (this.currentTab === 'notes') {
                     this.loadRemarksAndRender();
                 }
-            }, 3000); 
-            return; // 强制拦截渲染，直到资源就绪或重试上限
+            }, 5000); // 增加间隔，减少主线程压力
         }
 
         // 3. 如果加载已完成或达到最大重试次数，重置计数器并继续渲染
@@ -3488,13 +3496,14 @@ class CloudflareManager {
 
                 if (finalAccountName) {
                     const colorClass = this.getAccountColorClass(finalAccountId);
-                    // 仅记录一次成功匹配，避免刷屏
-                    if (remarks.indexOf(remark) === 0) console.log(`[Remarks] ${type} MATCH OK: ${finalAccountName}`);
                     accountTagHtml = `<span class="account-tag ${colorClass}" style="margin-left: 8px !important; display: inline-block !important; padding: 2px 6px !important; border-radius: 4px !important; font-size: 11px !important; line-height: 1 !important; color: white !important; vertical-align: middle !important;">${this.escapeHtml(finalAccountName)}</span>`;
+                } else if (anyLoading || pendingData) {
+                    // 异步占位符：显示同步中
+                    accountTagHtml = `<span class="account-tag" style="margin-left: 8px !important; display: inline-block !important; padding: 2px 6px !important; border-radius: 4px !important; font-size: 11px !important; line-height: 1 !important; color: rgba(255,255,255,0.7) !important; background: rgba(255,255,255,0.1) !important; vertical-align: middle !important; border: 1px dashed rgba(255,255,255,0.2) !important;">同步中...</span>`;
                 } else {
-                    // 如果列表已经加载但还是没匹配到，输出一下首个资源看看 ID 对不对
+                    // 最终确实没匹配到
                     if (remark.type === 'worker' && this.workers.length > 0 && remarks.indexOf(remark) === 0) {
-                        console.warn(`[Remarks] Worker Match Failed! Remark ID: "${remark.id}". First Worker ID in list: "${this.workers[0].id}"`);
+                        console.warn(`[Remarks] Worker Match Failed! Remark ID: "${remark.id}". Pool size: ${this.workers.length}`);
                     }
                 }
 
