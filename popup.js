@@ -1459,33 +1459,31 @@ class CloudflareManager {
      * 更新头部账户名称显示和颜色
      */
     async updateHeaderAccountUI() {
-        const headerAccountName = document.getElementById('headerAccountName');
-        if (!headerAccountName) return;
+    const headerAccountName = document.getElementById('headerAccountName');
+    if (!headerAccountName) return;
 
-        if (this.currentAccount) {
-            headerAccountName.textContent = this.currentAccount.name;
-            headerAccountName.style.display = 'inline-block';
+    if (this.currentAccount) {
+        headerAccountName.textContent = this.currentAccount.name;
+        headerAccountName.style.display = 'inline-block';
+        headerAccountName.className = 'header-account-badge';
 
-            // 基础类名，保持 header-account-badge
-            headerAccountName.className = 'header-account-badge';
-
+        // 异步尝试获取颜色，不阻塞主流程
+        (async () => {
             try {
-                // 尝试获取真实的 Cloudflare 账户 ID 以匹配颜色
-                // 此时 getAccountId 会尝试通过 API 或已加载的 zones 获取
+                // 如果本地已经有 accountId (从缓存加载的)，则直接使用
                 const realAccountId = await this.getAccountId();
-                if (realAccountId) {
+                if (realAccountId && this.currentAccount) {
                     const colorClass = this.getAccountColorClass(realAccountId);
                     headerAccountName.classList.add(colorClass);
                 }
             } catch (e) {
-                // 如果暂时获取不到 ID（例如还在加载中），保持默认样式
-                console.log('未获取到账户 ID，保持默认颜色');
+                console.log('[UI] Skip color update for now');
             }
-        } else {
-            headerAccountName.style.display = 'none';
-        }
+        })();
+    } else {
+        headerAccountName.style.display = 'none';
     }
-
+}
     renderAccountSelector() {
         const select = document.getElementById('accountSelect');
         select.innerHTML = '<option value="">请选择账户</option>';
@@ -1503,70 +1501,78 @@ class CloudflareManager {
 
     // 加载所有域名和所有记录
     async loadAllZonesAndRecords() {
-        const tabsSection = document.getElementById('tabsSection');
-        const statsSection = document.getElementById('statsSection');
-        const dnsSection = document.getElementById('dnsSection');
-        const recordsList = document.getElementById('recordsList');
+    const tabsSection = document.getElementById('tabsSection');
+    const dnsSection = document.getElementById('dnsSection');
+    const recordsList = document.getElementById('recordsList');
 
-        try {
-            // 1. 瞬间呈现：显示 Tab 布局，不使用 showLoading() 遮罩阻断用户操作
-            tabsSection.style.display = 'block';
-            dnsSection.style.display = 'block';
-            
-            // 2. 局部加载状态：仅在列表区显示加载，不卡死全局
-            if (this.allRecords.length === 0) {
-                recordsList.innerHTML = '<div class="loading">正在加载缓存记录...</div>';
-            }
+    try {
+        // 1. 瞬间呈现 Tab
+        tabsSection.style.display = 'block';
+        dnsSection.style.display = 'block';
+        
+        // 2. 状态重置
+        this.selectedZoneId = '';
+        this.searchQuery = '';
+        document.getElementById('searchInput').value = '';
+        document.getElementById('clearSearchBtn').style.display = 'none';
 
-            // 3. 智能重置：保留全局资源（Workers/Pages），仅重置当前账户相关的 DNS 状态
-            this.selectedZoneId = '';
-            this.searchQuery = '';
-            // 不再重置 this.workers = []; 和 this.pages = []; 确保备注页秒开
+        // 3. 数据重置，但先尝试加载缓存以保持界面不为空白
+        this.zones = [];
+        this.allRecords = [];
+        this.workers = [];
+        this.pages = [];
+        this.accountId = null; // 必须重置，否则 getAccountId 会返回旧记录
 
-            // 4. 重置搜索 UI
-            document.getElementById('searchInput').value = '';
-            document.getElementById('clearSearchBtn').style.display = 'none';
+        // 4. 加载缓存（极速）
+        await this.loadResourceCache();
 
-            // 5. 重要：切换账户时必须彻底清除旧账户的 Workers 和 Pages 状态，防止 UI 混淆
-            this.workers = [];
-            this.pages = [];
-            this.allRecords = [];
-            this.zones = [];
-            
-            // 尝试加载新账户的缓存
-            await this.loadResourceCache();
-
-            // 6. 执行加载流程（后台执行，不阻塞 UI 渲染完成）
-            // 我们先渲染一次缓存数据
-            this.renderAllRecords();
-            this.renderZoneFilter();
-
-            // 7. 异步刷新：在后台拉取最新数据
-            setTimeout(async () => {
-                try {
-                    console.log('[AccountSwitch] Background refreshing zones and records...');
-                    await this.loadZones();
-                    this.renderZoneFilter();
-                    
-                    await this.loadAllRecords();
-                    
-                    this.collapsedZones = new Set(this.zones.map(z => z.name));
-                    document.getElementById('recordCount').textContent = `${this.allRecords.length} 条记录`;
-                    
-                    this.updateNotesStatCard();
-                    this.renderAllRecords();
-                    this.updateHeaderAccountUI();
-                    
-                    await this.saveResourceCache();
-                } catch (e) {
-                    console.error('[AccountSwitch] Background refresh failed:', e);
-                }
-            }, 0);
-
-        } catch (error) {
-            this.showToast(error.message, 'error');
+        // 5. 瞬间渲染缓存数据
+        this.renderAllRecords();
+        this.renderZoneFilter();
+        this.updateNotesStatCard();
+        
+        if (this.allRecords.length === 0) {
+            recordsList.innerHTML = '<div class="loading">正在拉取 Cloudflare 实时数据...</div>';
         }
+
+        // 6. 异步刷新：在后台拉取最新数据，完全不阻塞 switchAccount 的完成
+        setTimeout(async () => {
+            try {
+                console.log('[AccountSwitch] Background refreshing...');
+                
+                // 拉取 Zones
+                await this.loadZones();
+                this.renderZoneFilter();
+                
+                // 拉取 DNS
+                await this.loadAllRecords();
+                
+                // 更新统计与 UI
+                this.collapsedZones = new Set(this.zones.map(z => z.name));
+                const recordCountEl = document.getElementById('recordCount');
+                if (recordCountEl) recordCountEl.textContent = `${this.allRecords.length} 条记录`;
+                
+                this.updateNotesStatCard();
+                this.renderAllRecords();
+                
+                // 最后触发一次 UI 颜色等更新 (因为此时 accountId 肯定拿到了)
+                this.updateHeaderAccountUI();
+                
+                // 自动加载 Workers/Pages (取决于当前在哪个 Tab)
+                if (this.currentTab === 'workers') this.loadWorkersAndRender();
+                if (this.currentTab === 'pages') this.loadPagesAndRender();
+                
+                await this.saveResourceCache();
+                console.log('[AccountSwitch] Background refresh completed.');
+            } catch (e) {
+                console.error('[AccountSwitch] Background refresh failed:', e);
+            }
+        }, 50); // 微弱延迟，确保主渲染队列完成
+
+    } catch (error) {
+        this.showToast(error.message, 'error');
     }
+}
 
 
     // 获取账户颜色类名
@@ -1960,25 +1966,25 @@ class CloudflareManager {
     }
 
     async switchAccount(accountId) {
-        if (!accountId) {
-            this.currentAccount = null;
-            document.getElementById('statsSection').style.display = 'none';
-            document.getElementById('dnsSection').style.display = 'none';
-            return;
-        }
-
-        this.currentAccount = this.accounts.find(a => a.id === accountId);
-        // 重置 accountId，以便 getAccountId 重新获取正确的 Cloudflare ID
-        this.accountId = null;
-
-        // 更新头部 UI
-        await this.updateHeaderAccountUI();
-
-        await this.saveAccounts();
-        await this.loadAllZonesAndRecords();
-
-        // 数据加载完成后，loadAllZonesAndRecords 内部会自动再次调用 updateHeaderAccountUI
+    if (!accountId) {
+        this.currentAccount = null;
+        document.getElementById('statsSection').style.display = 'none';
+        document.getElementById('dnsSection').style.display = 'none';
+        return;
     }
+
+    this.currentAccount = this.accounts.find(a => a.id === accountId);
+    this.accountId = null;
+
+    // 瞬间更新名称（不等待获取颜色 ID）
+    this.updateHeaderAccountUI();
+
+    // 极速保存并进入并行加载流程
+    await this.saveAccounts();
+    
+    // loadAllZonesAndRecords 内部现在已经异步化，不会阻塞 switchAccount 返回
+    await this.loadAllZonesAndRecords();
+}
 
     /**
      * 切换到下一个账户
