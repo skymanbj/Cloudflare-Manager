@@ -173,10 +173,10 @@ class GitHubSyncManager {
         try {
             // 1. 获取远程数据
             const remoteData = await this.getRemoteData();
-            
+
             // 2. 获取本地删除记录
             const { deletedKeys = [] } = await this.getLocalDeletedKeys();
-            
+
             // 3. 合并数据
             const merged = this.mergeRemarks(
                 this.manager.remarks,
@@ -230,7 +230,7 @@ class GitHubSyncManager {
 
         try {
             const remoteData = await this.getRemoteData();
-            
+
             // 处理删除的 key
             if (remoteData.deletedKeys) {
                 for (const key of remoteData.deletedKeys) {
@@ -390,7 +390,7 @@ class GitHubSyncManager {
         } else if (this.config.lastSyncTime) {
             const lastSync = new Date(this.config.lastSyncTime);
             this.setSyncStatus('connected', `已连接`);
-            
+
             const lastSyncEl = document.getElementById('lastSyncTime');
             if (lastSyncEl) {
                 lastSyncEl.textContent = `上次同步: ${lastSync.toLocaleString('zh-CN')}`;
@@ -440,29 +440,36 @@ class CloudflareManager {
         this.selectedZoneId = '';
         this.workersSearchQuery = '';
         this.pagesSearchQuery = '';
-            this.collapsedZones = new Set(); // 存储折叠的域名
-        
+        this.collapsedZones = new Set(); // 存储折叠的域名
+
+        // 加载状态位
+        this.isLoadingZones = false;
+        this.isLoadingWorkers = false;
+        this.isLoadingPages = false;
+
         // 资源备注相关
         this.remarks = {}; // { 'type:id': { content, tags, updatedAt } }
         this.currentRemarkTarget = null; // { type, id, name, detail }
         this.remarksSearchQuery = '';
         this.remarksTypeFilter = '';
-        
+        this.remarksRetryCount = 0; // 备注重试计数器
+        this.remarksMaxRetries = 5; // 最大重试次数
+
         // 账户颜色映射
         this.accountColorMap = new Map();
         this.nextColorIndex = 0;
-        
+
         // 全局提示框相关
         this.tooltipEl = document.getElementById('globalRemarkTooltip');
         this.tooltipTimer = null;
         this.initGlobalTooltip();
-        
+
         // GitHub 同步管理器
         this.githubSync = new GitHubSyncManager(this);
-        
+
         // Markdown 编辑器状态
         this.isPreviewing = false;
-        
+
         // 初始化 
         // 处理点击外部关闭备注窗口
         document.addEventListener('click', (e) => {
@@ -538,19 +545,19 @@ class CloudflareManager {
 
         // 渲染内容并填充
         this.tooltipEl.innerHTML = this.getRemarkTooltipHtml(type, id);
-        
+
         // 先设为可见但透明，以计算尺寸
         this.tooltipEl.style.display = 'block';
         this.tooltipEl.style.opacity = '0';
-        
+
         const rect = anchorEl.getBoundingClientRect();
-        
+
         // 强制重绘以获取正确尺寸
-        this.tooltipEl.offsetHeight; 
-        
+        this.tooltipEl.offsetHeight;
+
         const tooltipWidth = this.tooltipEl.offsetWidth || 350;
         const tooltipHeight = this.tooltipEl.offsetHeight || 100;
-        
+
         // 默认位置：按钮右侧中心对齐
         let left = rect.right + 12;
         let top = rect.top + rect.height / 2 - tooltipHeight / 2;
@@ -559,7 +566,7 @@ class CloudflareManager {
         if (left + tooltipWidth > window.innerWidth - 10) {
             left = rect.left - tooltipWidth - 12;
         }
-        
+
         // 边界检查：上下溢出限制
         if (top < 10) top = 10;
         if (top + tooltipHeight > window.innerHeight - 10) {
@@ -577,7 +584,7 @@ class CloudflareManager {
      */
     hideGlobalTooltip() {
         if (this.tooltipTimer) return;
-        
+
         this.tooltipTimer = setTimeout(() => {
             this.tooltipEl.classList.remove('show');
             setTimeout(() => {
@@ -623,21 +630,21 @@ class CloudflareManager {
         }
 
         const url = `https://api.cloudflare.com/client/v4${endpoint}`;
-    const options = {
-        method,
-        headers: {
-            'Authorization': `Bearer ${this.currentAccount.token}`
-        }
-    };
+        const options = {
+            method,
+            headers: {
+                'Authorization': `Bearer ${this.currentAccount.token}`
+            }
+        };
 
-    // Only set Content-Type to application/json if body is NOT FormData
-    if (body && !(body instanceof FormData)) {
-        options.headers['Content-Type'] = 'application/json';
-        options.body = JSON.stringify(body);
-    } else if (body instanceof FormData) {
-        // When using FormData, fetch automatically sets the correct Content-Type with boundary
-        options.body = body;
-    }
+        // Only set Content-Type to application/json if body is NOT FormData
+        if (body && !(body instanceof FormData)) {
+            options.headers['Content-Type'] = 'application/json';
+            options.body = JSON.stringify(body);
+        } else if (body instanceof FormData) {
+            // When using FormData, fetch automatically sets the correct Content-Type with boundary
+            options.body = body;
+        }
 
         try {
             const response = await fetch(url, options);
@@ -675,34 +682,37 @@ class CloudflareManager {
     }
 
     async loadZones() {
+        this.isLoadingZones = true;
         this.zones = [];
         let page = 1;
         const perPage = 50;
-        
+
         while (true) {
             try {
                 // Cloudflare pagination is 1-based
                 const response = await this.apiRequest(`/zones?per_page=${perPage}&page=${page}`);
                 const zones = response || [];
-                
+
                 this.zones.push(...zones);
-                
+
                 if (zones.length < perPage) {
                     break;
                 }
                 page++;
             } catch (error) {
                 console.error('Failed to load zones page', page, error);
+                this.isLoadingZones = false; // Ensure loading state is reset on error
                 break;
             }
         }
+        this.isLoadingZones = false;
         return this.zones;
     }
 
     // 加载所有域名的所有 DNS 记录
     async loadAllRecords() {
         this.allRecords = [];
-        
+
         for (const zone of this.zones) {
             try {
                 const records = await this.apiRequest(`/zones/${zone.id}/dns_records`);
@@ -719,7 +729,7 @@ class CloudflareManager {
                 console.error(`加载 ${zone.name} 的记录失败:`, error);
             }
         }
-        
+
         // 按域名分组排序
         this.allRecords.sort((a, b) => {
             if (a.zoneName !== b.zoneName) {
@@ -727,7 +737,7 @@ class CloudflareManager {
             }
             return a.name.localeCompare(b.name);
         });
-        
+
         return this.allRecords;
     }
 
@@ -746,29 +756,29 @@ class CloudflareManager {
     // Workers API Methods
     async getAccountId() {
         if (this.accountId) return this.accountId;
-        
+
         // 1. 尝试通过 /accounts API 获取，并尝试匹配当前账户名称
         try {
             const accounts = await this.apiRequest('/accounts?per_page=50');
             if (accounts && accounts.length > 0) {
                 // 尝试找到名称包含当前账户名（或被当前账户名包含）的账户
                 const currentName = (this.currentAccount?.name || '').toLowerCase();
-                let matchedAccount = accounts.find(acc => 
-                    acc.name.toLowerCase().includes(currentName) || 
+                let matchedAccount = accounts.find(acc =>
+                    acc.name.toLowerCase().includes(currentName) ||
                     currentName.includes(acc.name.toLowerCase())
                 );
-                
+
                 // 如果是特定已知的超级管理员，优先匹配对应的邮箱
                 if (currentName === 'liubohn69') {
-                     const superMatch = accounts.find(acc => acc.name.toLowerCase().includes('liubohn69@gmail.com'));
-                     if (superMatch) matchedAccount = superMatch;
+                    const superMatch = accounts.find(acc => acc.name.toLowerCase().includes('liubohn69@gmail.com'));
+                    if (superMatch) matchedAccount = superMatch;
                 }
 
                 if (matchedAccount) {
                     this.accountId = matchedAccount.id;
                     return this.accountId;
                 }
-                
+
                 // 如果没有匹配，默认取第一个，但优先避开 "hotmail account" 这种看起来像副号的（如果能区分的话）
                 // 暂时取第一个
                 this.accountId = accounts[0].id;
@@ -777,48 +787,50 @@ class CloudflareManager {
         } catch (error) {
             console.warn('无法通过 /accounts 获取账户 ID:', error);
         }
-        
+
         // 2. 如果 zones 已经加载，尝试从 zones 获取
         // 注意：这可能不准确，因为 zones 可能混合了多个账户
         if (this.zones && this.zones.length > 0 && this.zones[0].account) {
             // 尝试在 zones 中寻找匹配的账户
             const currentName = (this.currentAccount?.name || '').toLowerCase();
-            const matchedZone = this.zones.find(z => 
+            const matchedZone = this.zones.find(z =>
                 z.account && (z.account.name.toLowerCase().includes(currentName) || currentName.includes(z.account.name.toLowerCase()))
             );
-            
+
             if (matchedZone) {
                 this.accountId = matchedZone.account.id;
             } else {
-                 this.accountId = this.zones[0].account.id;
+                this.accountId = this.zones[0].account.id;
             }
             return this.accountId;
         }
-        
+
         // 3. 如果都失败，尝试加载 zones
         if (this.zones.length === 0) {
-             try {
+            try {
                 await this.loadZones();
                 if (this.zones.length > 0 && this.zones[0].account) {
                     this.accountId = this.zones[0].account.id;
                     return this.accountId;
                 }
-             } catch(e) { /* ignore */ }
+            } catch (e) { /* ignore */ }
         }
-        
+
         // 如果还是获取不到，但我们有 currentAccount 对象且它是从存储中加载的，
         // 这里的 currentAccount 是我们自己存储的结构 {id, name, token}，id 是 uuid
         // 并不是 Cloudflare 的 account_tag。
-        
+
         throw new Error('无法获取账户 ID，请确保 API Token 有正确的权限');
     }
 
     async loadWorkers() {
-        this.workers = [];
-        // Case-insensitive check and trim
-        const currentName = (this.currentAccount.name || '').toLowerCase().trim();
-        const isSuperAdmin = currentName === 'liubohn69@gmail.com';
-        
+        this.isLoadingWorkers = true;
+        // 放宽判定：只要包含核心名称或邮箱就开启全量扫描
+        const currentName = ((this.currentAccount && this.currentAccount.name) || '').toLowerCase().trim();
+        const isSuperAdmin = currentName.includes('liubohn69');
+
+        console.log(`[Workers] Loading workers. Mode: ${isSuperAdmin ? 'Full-Account-Scan' : 'Current-Account-Only'} (${currentName})`);
+
         try {
             if (isSuperAdmin) {
                 // Collect accounts from multiple sources to be robust
@@ -847,15 +859,15 @@ class CloudflareManager {
                     this.zones.forEach(z => {
                         if (z.account && z.account.id) {
                             if (!uniqueAccounts.has(z.account.id)) {
-                                uniqueAccounts.set(z.account.id, { 
-                                    id: z.account.id, 
-                                    name: z.account.name 
+                                uniqueAccounts.set(z.account.id, {
+                                    id: z.account.id,
+                                    name: z.account.name
                                 });
                             }
                         }
                     });
                 }
-                
+
                 const allAccounts = Array.from(uniqueAccounts.values());
                 console.log(`Scanning ${allAccounts.length} accounts for Workers`);
 
@@ -875,10 +887,14 @@ class CloudflareManager {
                         return [];
                     }
                 });
-                
+
                 const results = await Promise.all(promises);
                 this.workers = results.flat();
-                
+                console.log(`[Workers] Total workers loaded: ${this.workers.length} from ${allAccounts.length} accounts.`);
+                results.forEach((res, i) => {
+                    if (res.length > 0) console.log(`  - Account "${allAccounts[i].name}": ${res.length} workers`);
+                });
+
             } else {
                 // Standard fetch
                 const accountId = await this.getAccountId();
@@ -891,7 +907,7 @@ class CloudflareManager {
                     }
                 }));
             }
-            
+
             // Sort: Account Name -> Worker ID
             this.workers.sort((a, b) => {
                 const accountA = a.account?.name || '';
@@ -901,9 +917,11 @@ class CloudflareManager {
                 }
                 return a.id.localeCompare(b.id);
             });
-            
+
+            this.isLoadingWorkers = false;
             return this.workers;
         } catch (error) {
+            this.isLoadingWorkers = false;
             console.error('loadWorkers error:', error);
             throw error;
         }
@@ -931,11 +949,13 @@ class CloudflareManager {
 
     // Pages API Methods
     async loadPages() {
-        this.pages = [];
-        // Case-insensitive check and trim
-        const currentName = (this.currentAccount.name || '').toLowerCase().trim();
-        const isSuperAdmin = currentName === 'liubohn69@gmail.com';
-        
+        this.isLoadingPages = true;
+        // 放宽判定：同上
+        const currentName = ((this.currentAccount && this.currentAccount.name) || '').toLowerCase().trim();
+        const isSuperAdmin = currentName.includes('liubohn69');
+
+        console.log(`[Pages] Loading pages. Mode: ${isSuperAdmin ? 'Full-Account-Scan' : 'Current-Account-Only'} (${currentName})`);
+
         try {
             if (isSuperAdmin) {
                 // Collect accounts from multiple sources
@@ -964,9 +984,9 @@ class CloudflareManager {
                     this.zones.forEach(z => {
                         if (z.account && z.account.id) {
                             if (!uniqueAccounts.has(z.account.id)) {
-                                uniqueAccounts.set(z.account.id, { 
-                                    id: z.account.id, 
-                                    name: z.account.name 
+                                uniqueAccounts.set(z.account.id, {
+                                    id: z.account.id,
+                                    name: z.account.name
                                 });
                             }
                         }
@@ -975,7 +995,7 @@ class CloudflareManager {
 
                 const allAccounts = Array.from(uniqueAccounts.values());
                 console.log(`Scanning ${allAccounts.length} accounts for Pages`);
-                
+
                 // Parallel fetch
                 const promises = allAccounts.map(async account => {
                     try {
@@ -992,10 +1012,14 @@ class CloudflareManager {
                         return [];
                     }
                 });
-                
+
                 const results = await Promise.all(promises);
                 this.pages = results.flat();
-                
+                console.log(`[Pages] Total pages loaded: ${this.pages.length} from ${allAccounts.length} accounts.`);
+                results.forEach((res, i) => {
+                    if (res.length > 0) console.log(`  - Account "${allAccounts[i].name}": ${res.length} projects`);
+                });
+
             } else {
                 // Standard fetch
                 const accountId = await this.getAccountId();
@@ -1019,8 +1043,10 @@ class CloudflareManager {
                 return a.name.localeCompare(b.name);
             });
 
+            this.isLoadingPages = false;
             return this.pages;
         } catch (error) {
+            this.isLoadingPages = false;
             console.error('loadPages error:', error);
             throw error;
         }
@@ -1034,14 +1060,14 @@ class CloudflareManager {
         document.getElementById('menuBtn').addEventListener('click', () => this.openSidebar());
         document.getElementById('closeSidebar').addEventListener('click', () => this.closeSidebar());
         document.getElementById('sidebarOverlay').addEventListener('click', () => this.closeSidebar());
-        
+
         // Header actions
         document.getElementById('refreshBtn').addEventListener('click', () => this.refresh());
         document.getElementById('exportBtn').addEventListener('click', () => this.exportData());
 
         // Welcome section
         document.getElementById('welcomeAddAccountBtn').addEventListener('click', () => this.openSidebar());
-        
+
         // 点击头部账户名切换到下一个账户
         const headerAccountName = document.getElementById('headerAccountName');
         if (headerAccountName) {
@@ -1112,56 +1138,56 @@ class CloudflareManager {
         if (remarksSearchInput) {
             remarksSearchInput.addEventListener('input', (e) => this.handleRemarksSearch(e.target.value));
         }
-        
+
         const remarksTypeFilter = document.getElementById('remarksTypeFilter');
         if (remarksTypeFilter) {
             remarksTypeFilter.addEventListener('change', (e) => this.handleRemarksTypeFilter(e.target.value));
         }
-        
+
         const exportRemarksBtn = document.getElementById('exportRemarksBtn');
         if (exportRemarksBtn) {
             exportRemarksBtn.addEventListener('click', () => this.exportRemarks());
         }
-        
+
         // DNS 导出按钮
         const exportDnsBtn = document.getElementById('exportDnsBtn');
         if (exportDnsBtn) {
             exportDnsBtn.addEventListener('click', () => this.exportDnsData());
         }
-        
+
         // Workers 导出按钮
         const exportWorkersBtn = document.getElementById('exportWorkersBtn');
         if (exportWorkersBtn) {
             exportWorkersBtn.addEventListener('click', () => this.exportWorkersData());
         }
-        
+
         // Pages 导出按钮
         const exportPagesBtn = document.getElementById('exportPagesBtn');
         if (exportPagesBtn) {
             exportPagesBtn.addEventListener('click', () => this.exportPagesData());
         }
-        
+
         // 备注弹窗事件
         const closeRemarkModal = document.getElementById('closeRemarkModal');
         if (closeRemarkModal) {
             closeRemarkModal.addEventListener('click', () => this.closeRemarkModal());
         }
-        
+
         const remarkModalOverlay = document.querySelector('#remarkModal .modal-overlay');
         if (remarkModalOverlay) {
             remarkModalOverlay.addEventListener('click', () => this.closeRemarkModal());
         }
-        
+
         const saveRemarkBtn = document.getElementById('saveRemarkBtn');
         if (saveRemarkBtn) {
             saveRemarkBtn.addEventListener('click', () => this.saveRemark());
         }
-        
+
         const deleteRemarkBtn = document.getElementById('deleteRemarkBtn');
         if (deleteRemarkBtn) {
             deleteRemarkBtn.addEventListener('click', () => this.deleteRemark());
         }
-        
+
         const cancelRemarkBtn = document.getElementById('cancelRemarkBtn');
         if (cancelRemarkBtn) {
             cancelRemarkBtn.addEventListener('click', () => this.closeRemarkModal());
@@ -1178,7 +1204,7 @@ class CloudflareManager {
         // 启用同步开关
         const enableCheckbox = document.getElementById('enableGithubSync');
         const settingsDiv = document.getElementById('githubSyncSettings');
-        
+
         if (enableCheckbox) {
             enableCheckbox.addEventListener('change', () => {
                 if (settingsDiv) {
@@ -1190,7 +1216,7 @@ class CloudflareManager {
         // 定时同步开关
         const timerCheckbox = document.getElementById('enableTimerSync');
         const intervalGroup = document.getElementById('syncIntervalGroup');
-        
+
         if (timerCheckbox) {
             timerCheckbox.addEventListener('change', () => {
                 if (intervalGroup) {
@@ -1276,24 +1302,24 @@ class CloudflareManager {
     // =====================================================
     switchTab(tab) {
         this.currentTab = tab;
-        
+
         // Update tab buttons
         document.querySelectorAll('.tab').forEach(t => {
             t.classList.toggle('active', t.dataset.tab === tab);
         });
-        
+
         // Show/hide sections
         document.getElementById('dnsSection').style.display = tab === 'dns' ? 'block' : 'none';
         document.getElementById('workersSection').style.display = tab === 'workers' ? 'block' : 'none';
         document.getElementById('pagesSection').style.display = tab === 'pages' ? 'block' : 'none';
         document.getElementById('notesSection').style.display = tab === 'notes' ? 'block' : 'none';
-        
+
         // Update stats visibility
         const notesStatCard = document.getElementById('notesStatCard');
         if (notesStatCard) {
             notesStatCard.style.display = tab === 'notes' ? 'flex' : 'none';
         }
-        
+
         // Load data if needed
         if (tab === 'workers' && this.workers.length === 0) {
             this.loadWorkersAndRender();
@@ -1331,7 +1357,7 @@ class CloudflareManager {
     renderZoneFilter() {
         const select = document.getElementById('zoneFilter');
         select.innerHTML = '<option value="">全部域名</option>';
-        
+
         this.zones.forEach(zone => {
             const option = document.createElement('option');
             option.value = zone.id;
@@ -1342,22 +1368,22 @@ class CloudflareManager {
 
     getFilteredRecords() {
         let records = this.allRecords;
-        
+
         // 先按域名筛选
         if (this.selectedZoneId) {
             records = records.filter(record => record.zoneId === this.selectedZoneId);
         }
-        
+
         // 再按搜索关键词筛选
         if (this.searchQuery) {
             records = records.filter(record => {
                 return record.zoneName.toLowerCase().includes(this.searchQuery) ||
-                       record.name.toLowerCase().includes(this.searchQuery) ||
-                       record.content.toLowerCase().includes(this.searchQuery) ||
-                       record.type.toLowerCase().includes(this.searchQuery);
+                    record.name.toLowerCase().includes(this.searchQuery) ||
+                    record.content.toLowerCase().includes(this.searchQuery) ||
+                    record.type.toLowerCase().includes(this.searchQuery);
             });
         }
-        
+
         return records;
     }
 
@@ -1366,14 +1392,14 @@ class CloudflareManager {
     // =====================================================
     updateUI() {
         this.renderAccountSelector();
-        
+
         // 更新头部账户名显示和颜色
         this.updateHeaderAccountUI();
-        
+
         const tabsSection = document.getElementById('tabsSection');
         const statsSection = document.getElementById('statsSection');
         const welcomeSection = document.getElementById('welcomeSection');
-        
+
         if (this.accounts.length === 0) {
             // 没有账户，显示欢迎界面
             tabsSection.style.display = 'none';
@@ -1402,10 +1428,10 @@ class CloudflareManager {
         if (this.currentAccount) {
             headerAccountName.textContent = this.currentAccount.name;
             headerAccountName.style.display = 'inline-block';
-            
+
             // 基础类名，保持 header-account-badge
             headerAccountName.className = 'header-account-badge';
-            
+
             try {
                 // 尝试获取真实的 Cloudflare 账户 ID 以匹配颜色
                 // 此时 getAccountId 会尝试通过 API 或已加载的 zones 获取
@@ -1426,7 +1452,7 @@ class CloudflareManager {
     renderAccountSelector() {
         const select = document.getElementById('accountSelect');
         select.innerHTML = '<option value="">请选择账户</option>';
-        
+
         this.accounts.forEach(account => {
             const option = document.createElement('option');
             option.value = account.id;
@@ -1444,10 +1470,10 @@ class CloudflareManager {
         const statsSection = document.getElementById('statsSection');
         const dnsSection = document.getElementById('dnsSection');
         const recordsList = document.getElementById('recordsList');
-        
+
         try {
             this.showLoading();
-            
+
             // 重置状态
             // 重置所有数据状态
             this.selectedZoneId = '';
@@ -1457,7 +1483,7 @@ class CloudflareManager {
             this.zones = [];
             this.allRecords = [];
             this.accountId = null;
-            
+
             // 重置搜索框
             document.getElementById('searchInput').value = '';
             document.getElementById('clearSearchBtn').style.display = 'none';
@@ -1466,39 +1492,39 @@ class CloudflareManager {
             document.getElementById('recordsList').innerHTML = '';
             const workersList = document.querySelector('.workers-list');
             if (workersList) workersList.innerHTML = '';
-            
+
             const pagesList = document.querySelector('.pages-list');
             if (pagesList) pagesList.innerHTML = '';
-            
+
             const remarksList = document.getElementById('remarksList');
             if (remarksList) remarksList.innerHTML = '';
-            
+
             // 加载所有域名
             await this.loadZones();
-            
+
             // 显示标签页
             tabsSection.style.display = 'block';
-            
+
             // 填充域名筛选器
             this.renderZoneFilter();
-            
+
             // 加载所有记录
             dnsSection.style.display = 'block';
             recordsList.innerHTML = '<div class="loading">正在加载所有 DNS 记录...</div>';
-            
+
             await this.loadAllRecords();
-            
+
             // 默认折叠所有域名
             this.collapsedZones = new Set(this.zones.map(z => z.name));
-            
+
             document.getElementById('recordCount').textContent = `${this.allRecords.length} 条记录`;
-            
+
             // 更新备注统计卡片
             this.updateNotesStatCard();
             this.renderAllRecords();
             // 加载完成后再次更新头部颜色，确保获取到了真实的 Account ID
             this.updateHeaderAccountUI();
-            
+
             this.hideLoading();
         } catch (error) {
             this.hideLoading();
@@ -1509,14 +1535,14 @@ class CloudflareManager {
     // 获取账户颜色类名
     getAccountColorClass(accountId) {
         if (!accountId) return 'account-color-default';
-        
+
         if (!this.accountColorMap.has(accountId)) {
             // 分配下一个可用颜色
             const colorIndex = this.nextColorIndex % 6; // 6种预定义颜色
             this.accountColorMap.set(accountId, colorIndex);
             this.nextColorIndex++;
         }
-        
+
         const index = this.accountColorMap.get(accountId);
         return `account-color-${index}`;
     }
@@ -1526,9 +1552,9 @@ class CloudflareManager {
         const list = document.getElementById('recordsList');
         // 获取过滤后的记录用于统计和分组
         const filteredRecords = this.getFilteredRecords();
-        
+
         list.innerHTML = '';
-        
+
         // 按域名分组记录
         const groupedRecords = {};
         filteredRecords.forEach(record => {
@@ -1537,7 +1563,7 @@ class CloudflareManager {
             }
             groupedRecords[record.zoneName].push(record);
         });
-        
+
         // 确定要显示的域名列表
         let zonesToRender = this.zones;
 
@@ -1554,11 +1580,11 @@ class CloudflareManager {
                 return nameMatch || hasMatchingRecords;
             });
         }
-        
+
         // 如果最终没有要显示的域名
         if (zonesToRender.length === 0) {
             // ... (keep empty state logic but adapted) ...
-             if (this.searchQuery) {
+            if (this.searchQuery) {
                 list.innerHTML = `
                     <div class="empty-state">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
@@ -1591,7 +1617,7 @@ class CloudflareManager {
             searchInfo.innerHTML = `找到 <strong>${matchingZones}</strong> 个域名，<strong>${matchingRecords}</strong> 条记录`;
             list.appendChild(searchInfo);
         }
-        
+
         // 渲染域名分组
         zonesToRender.sort((a, b) => {
             const accountA = a.account?.name || '';
@@ -1604,31 +1630,31 @@ class CloudflareManager {
             const zoneName = zone.name;
             const records = groupedRecords[zoneName] || [];
             const isCollapsed = this.collapsedZones.has(zoneName);
-            
+
             // 域名分组容器
             const groupContainer = document.createElement('div');
             groupContainer.className = 'zone-group';
-            
+
             // 获取 zoneId 和账户信息
             const zoneId = zone.id;
             const accountName = zone.account?.name || '';
             const accountId = zone.account?.id || '';
-            
+
             // 生成账户标签 HTML
             let accountTagHtml = '';
             if (accountName) {
                 const colorClass = this.getAccountColorClass(accountId);
                 accountTagHtml = `<span class="account-tag ${colorClass}" title="所属账户: ${this.escapeHtml(accountName)}">${this.escapeHtml(accountName)}</span>`;
             }
-            
+
             // 域名分组标题（可点击折叠）
             const groupHeader = document.createElement('div');
             groupHeader.className = `zone-group-header ${isCollapsed ? 'collapsed' : ''}`;
             const zoneRemarkBtn = this.getRemarkButtonHtml('zone', zoneId, '添加域名备注').replace('data-action="remark"', 'data-action="zone-remark"');
-            
+
             // 如果没有记录，可以在数量显示上做区分
             const countText = records.length > 0 ? `${records.length} 条记录` : '无记录';
-            
+
             groupHeader.innerHTML = `
                 <div class="zone-header-left">
                     <span class="zone-toggle">${isCollapsed ? '▶' : '▼'}</span>
@@ -1638,23 +1664,23 @@ class CloudflareManager {
                 </div>
                 <span class="zone-record-count">${countText}</span>
             `;
-            
+
             // 域名备注按钮事件
             groupHeader.querySelector('[data-action="zone-remark"]').addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.openRemarkModal('zone', zoneId, zoneName, countText);
             });
-            
+
             groupHeader.addEventListener('click', (e) => {
                 if (e.target.closest('[data-action="zone-remark"]')) return;
                 this.toggleZoneCollapse(zoneName);
             });
             groupContainer.appendChild(groupHeader);
-            
+
             // 记录列表容器
             const recordsContainer = document.createElement('div');
             recordsContainer.className = `zone-records ${isCollapsed ? 'collapsed' : ''}`;
-            
+
             if (records.length === 0) {
                 recordsContainer.classList.add('empty-records-container');
                 recordsContainer.innerHTML = '<div class="empty-records-text">暂无 DNS 记录</div>';
@@ -1693,7 +1719,7 @@ class CloudflareManager {
                             </button>
                         </div>
                     `;
-                    
+
                     item.querySelector('[data-action="remark"]').addEventListener('click', (e) => {
                         this.handleRemarkButtonClick(e, 'dns', record.id, record.name, `${record.type} → ${record.content}`);
                     });
@@ -1706,11 +1732,11 @@ class CloudflareManager {
                         e.stopPropagation();
                         this.confirmDeleteRecord(record.zoneId, record.id);
                     });
-                    
+
                     recordsContainer.appendChild(item);
                 });
             }
-            
+
             groupContainer.appendChild(recordsContainer);
             list.appendChild(groupContainer);
         });
@@ -1730,7 +1756,7 @@ class CloudflareManager {
     // 全部展开/折叠
     toggleAllZones() {
         const allCollapsed = this.collapsedZones.size === this.zones.length;
-        
+
         if (allCollapsed) {
             // 全部展开
             this.collapsedZones.clear();
@@ -1738,7 +1764,7 @@ class CloudflareManager {
             // 全部折叠
             this.collapsedZones = new Set(this.zones.map(z => z.name));
         }
-        
+
         this.renderAllRecords();
         this.updateToggleAllButton();
     }
@@ -1748,7 +1774,7 @@ class CloudflareManager {
         const btn = document.getElementById('toggleAllBtn');
         const icon = document.getElementById('toggleAllIcon');
         const allCollapsed = this.collapsedZones.size === this.zones.length;
-        
+
         if (allCollapsed) {
             icon.textContent = '▼';
             btn.innerHTML = '<span id="toggleAllIcon">▼</span> 全部展开';
@@ -1779,11 +1805,11 @@ class CloudflareManager {
     editAccount(accountId) {
         const account = this.accounts.find(a => a.id === accountId);
         if (!account) return;
-        
+
         document.getElementById('accountName').value = account.name;
         document.getElementById('apiToken').value = account.token;
         document.getElementById('deleteAccountBtn').style.display = 'block';
-        
+
         this.editingAccountId = accountId;
     }
 
@@ -1797,26 +1823,26 @@ class CloudflareManager {
     async saveAccount() {
         const name = document.getElementById('accountName').value.trim();
         const token = document.getElementById('apiToken').value.trim();
-        
+
         if (!name || !token) {
             this.showToast('请填写账户名称和 API Token', 'warning');
             return;
         }
-        
+
         try {
             this.showLoading();
-            
+
             // Validate token
             const isValid = await this.validateToken(token);
             if (!isValid) {
                 throw new Error('API Token 无效');
             }
-            
+
             // Get zones count
             const tempAccount = { token };
             this.currentAccount = tempAccount;
             const zones = await this.loadZones();
-            
+
             if (this.editingAccountId) {
                 // Update existing account
                 const index = this.accounts.findIndex(a => a.id === this.editingAccountId);
@@ -1839,32 +1865,32 @@ class CloudflareManager {
                 this.accounts.push(newAccount);
                 this.currentAccount = newAccount;
             }
-            
+
             await this.saveAccounts();
             this.hideLoading();
             this.clearAccountForm();
             this.renderAccountList();
             this.updateUI();
             this.showToast('账户保存成功', 'success');
-            
+
         } catch (error) {
             this.hideLoading();
             this.showToast(error.message, 'error');
         }
     }
-    
+
     /**
      * 渲染账户列表（侧边栏）
      */
     renderAccountList() {
         const listEl = document.getElementById('accountList');
         if (!listEl) return;
-        
+
         if (this.accounts.length === 0) {
             listEl.innerHTML = '<div class="empty-text">暂无已保存的账户</div>';
             return;
         }
-        
+
         listEl.innerHTML = this.accounts.map(account => `
             <div class="account-list-item ${this.currentAccount?.id === account.id ? 'active' : ''}" data-id="${account.id}">
                 <span class="account-list-item-name">${this.escapeHtml(account.name)}</span>
@@ -1874,11 +1900,11 @@ class CloudflareManager {
                 </div>
             </div>
         `).join('');
-        
+
         // 绑定事件
         listEl.querySelectorAll('.account-list-item').forEach(item => {
             const accountId = item.dataset.id;
-            
+
             // 点击切换账户
             item.addEventListener('click', (e) => {
                 if (!e.target.closest('.account-list-item-actions')) {
@@ -1886,13 +1912,13 @@ class CloudflareManager {
                     this.closeSidebar();
                 }
             });
-            
+
             // 编辑按钮
             item.querySelector('[data-action="edit"]').addEventListener('click', (e) => {
                 e.stopPropagation();
                 this.editAccount(accountId);
             });
-            
+
             // 删除按钮
             item.querySelector('[data-action="delete"]').addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1928,17 +1954,17 @@ class CloudflareManager {
             document.getElementById('dnsSection').style.display = 'none';
             return;
         }
-        
+
         this.currentAccount = this.accounts.find(a => a.id === accountId);
         // 重置 accountId，以便 getAccountId 重新获取正确的 Cloudflare ID
         this.accountId = null;
-        
+
         // 更新头部 UI
         await this.updateHeaderAccountUI();
-        
+
         await this.saveAccounts();
         await this.loadAllZonesAndRecords();
-        
+
         // 数据加载完成后，loadAllZonesAndRecords 内部会自动再次调用 updateHeaderAccountUI
     }
 
@@ -1983,7 +2009,7 @@ class CloudflareManager {
     renderZoneSelector() {
         const select = document.getElementById('recordZone');
         select.innerHTML = '';
-        
+
         this.zones.forEach(zone => {
             const option = document.createElement('option');
             option.value = zone.id;
@@ -2007,13 +2033,13 @@ class CloudflareManager {
     handleRecordTypeChange(type) {
         const priorityRow = document.getElementById('recordPriorityRow');
         const proxiedGroup = document.getElementById('recordProxied').closest('.form-group');
-        
+
         if (type === 'MX' || type === 'SRV') {
             priorityRow.style.display = 'flex';
         } else {
             priorityRow.style.display = 'none';
         }
-        
+
         // CNAME, A, AAAA usually support proxy. MX, TXT, NS, SRV don't.
         const canProxy = ['A', 'AAAA', 'CNAME'].includes(type);
         if (proxiedGroup) {
@@ -2025,26 +2051,26 @@ class CloudflareManager {
         console.log('editRecord called with:', record);
         this.editingRecordId = record.id;
         this.editingZoneId = record.zoneId;
-        
+
         this.renderZoneSelector();
-        
+
         const formEl = document.getElementById('recordForm');
         document.getElementById('recordFormTitle').textContent = '编辑 DNS 记录';
-        
+
         document.getElementById('recordZone').value = record.zoneId;
         document.getElementById('recordType').value = record.type;
         document.getElementById('recordName').value = record.name.replace(`.${record.zoneName}`, '');
         document.getElementById('recordContent').value = record.content;
         document.getElementById('recordTTL').value = record.ttl.toString();
         document.getElementById('recordProxied').checked = record.proxied;
-        
+
         const priorityInput = document.getElementById('recordPriority');
         if (priorityInput) {
             priorityInput.value = record.priority !== undefined ? record.priority : '';
         }
-        
+
         this.handleRecordTypeChange(record.type);
-        
+
         formEl.style.display = 'block';
         // 滚动到表单位置
         formEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2059,39 +2085,39 @@ class CloudflareManager {
         const proxied = document.getElementById('recordProxied').checked;
         const priorityInput = document.getElementById('recordPriority');
         const priority = (type === 'MX' || type === 'SRV') ? parseInt(priorityInput.value) : undefined;
-        
+
         if (!zoneId || !name || !content) {
             this.showToast('请填写完整信息', 'warning');
             return;
         }
-        
+
         // 获取域名
         const zone = this.zones.find(z => z.id === zoneId);
         if (!zone) {
             this.showToast('域名不存在', 'error');
             return;
         }
-        
+
         // Append zone name if not already present
         if (!name.endsWith(zone.name)) {
             name = name === '@' ? zone.name : `${name}.${zone.name}`;
         }
-        
+
         const recordData = { type, name, content, ttl };
-        
+
         // Only include proxied if it's supported by the record type
         if (['A', 'AAAA', 'CNAME'].includes(type)) {
             recordData.proxied = proxied;
         }
-        
+
         // Include priority for MX and SRV
         if (priority !== undefined && !isNaN(priority)) {
             recordData.priority = priority;
         }
-        
+
         try {
             this.showLoading();
-            
+
             if (this.editingRecordId) {
                 await this.updateRecord(this.editingZoneId, this.editingRecordId, recordData);
                 this.showToast('记录更新成功', 'success');
@@ -2099,11 +2125,11 @@ class CloudflareManager {
                 await this.createRecord(zoneId, recordData);
                 this.showToast('记录创建成功', 'success');
             }
-            
+
             this.hideLoading();
             this.hideRecordForm();
             await this.loadAllZonesAndRecords();
-            
+
         } catch (error) {
             this.hideLoading();
             this.showToast(error.message, 'error');
@@ -2133,7 +2159,7 @@ class CloudflareManager {
             this.showToast('没有可导出的记录', 'warning');
             return;
         }
-        
+
         const headers = ['Zone Name', 'Type', 'Name', 'Content', 'TTL', 'Proxied'];
         const rows = this.allRecords.map(r => [
             r.zoneName,
@@ -2143,10 +2169,10 @@ class CloudflareManager {
             r.ttl,
             r.proxied
         ]);
-        
+
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-        const filename = `all_dns_records_${new Date().toISOString().slice(0,10)}.csv`;
-        
+        const filename = `all_dns_records_${new Date().toISOString().slice(0, 10)}.csv`;
+
         const result = await this.downloadCSV(csv, filename);
     }
 
@@ -2185,13 +2211,13 @@ class CloudflareManager {
                     ...value
                 }))
         };
-        
+
         // 获取当前账户名称
         // 1. 从 accounts 数组中查找当前账户
         // 2. 从下拉框获取选中的文本
         // 3. 使用 currentAccount.name
         let accountName = 'cloudflare';
-        
+
         // 方法1：从 accounts 数组查找
         if (this.currentAccount?.id) {
             const account = this.accounts.find(a => a.id === this.currentAccount.id);
@@ -2199,7 +2225,7 @@ class CloudflareManager {
                 accountName = account.name;
             }
         }
-        
+
         // 方法2：如果还是默认值，尝试从下拉框获取
         if (accountName === 'cloudflare') {
             const accountSelect = document.getElementById('accountSelect');
@@ -2208,14 +2234,14 @@ class CloudflareManager {
                 accountName = selectedText;
             }
         }
-        
+
         // 如果账户名看起来像是 UUID，则使用默认名
         if (accountName.length > 30 && (accountName.match(/-/g) || []).length >= 3) {
             accountName = 'cloudflare';
         }
-        
+
         console.log('导出文件名使用账户名:', accountName); // 调试日志
-        
+
         // 替换文件名中不允许的字符
         const safeAccountName = accountName.replace(/[<>:"/\\|?*]/g, '_');
         // 生成日期时间字符串：YYYYMMDD-HHMMSS
@@ -2236,17 +2262,17 @@ class CloudflareManager {
             this.showToast('没有可导出的 Workers', 'warning');
             return;
         }
-        
+
         const headers = ['Name', 'Created', 'Modified'];
         const rows = this.workers.map(w => [
             w.id,
             w.created_on || '',
             w.modified_on || ''
         ]);
-        
+
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-        const filename = `workers_${new Date().toISOString().slice(0,10)}.csv`;
-        
+        const filename = `workers_${new Date().toISOString().slice(0, 10)}.csv`;
+
         const result = await this.downloadCSV(csv, filename);
     }
 
@@ -2269,19 +2295,19 @@ class CloudflareManager {
     async loadWorkersAndRender() {
         const workersList = document.getElementById('workersList');
         const workersStatCard = document.getElementById('workersStatCard');
-        
+
         try {
             workersList.innerHTML = '<div class="loading">正在加载 Workers...</div>';
-            
+
             await this.loadWorkers();
-            
+
             // 更新统计
             workersStatCard.style.display = 'flex';
             document.getElementById('workersCount').textContent = `${this.workers.length} 个 Workers`;
-            
+
             this.renderWorkers();
             this.updateTabCounts();
-            
+
         } catch (error) {
             workersList.innerHTML = `<div class="empty-state"><p>加载失败: ${this.escapeHtml(error.message)}</p></div>`;
         }
@@ -2308,7 +2334,7 @@ class CloudflareManager {
     renderWorkers() {
         const list = document.getElementById('workersList');
         const filteredWorkers = this.getFilteredWorkers();
-        
+
         if (filteredWorkers.length === 0) {
             if (this.workersSearchQuery) {
                 list.innerHTML = `
@@ -2333,9 +2359,9 @@ class CloudflareManager {
             }
             return;
         }
-        
+
         list.innerHTML = '';
-        
+
         // 如果有搜索关键词，显示搜索结果统计
         if (this.workersSearchQuery) {
             const searchInfo = document.createElement('div');
@@ -2347,7 +2373,7 @@ class CloudflareManager {
         filteredWorkers.forEach(worker => {
             const createdDate = worker.created_on ? new Date(worker.created_on).toLocaleDateString('zh-CN') : '-';
             const modifiedDate = worker.modified_on ? new Date(worker.modified_on).toLocaleDateString('zh-CN') : '-';
-            
+
             const remark = this.getRemark('worker', worker.id);
             const alias = remark?.alias;
             const displayName = alias || worker.id;
@@ -2396,7 +2422,7 @@ class CloudflareManager {
                     </button>
                 </div>
             `;
-            
+
             item.querySelector('[data-action="remark"]').addEventListener('click', (e) => {
                 this.handleRemarkButtonClick(e, 'worker', worker.id, worker.id, `创建于 ${createdDate}`);
             });
@@ -2404,7 +2430,7 @@ class CloudflareManager {
             item.querySelector('[data-action="rename"]').addEventListener('click', (e) => {
                 this.handleRemarkButtonClick(e, 'worker', worker.id, worker.id, `创建于 ${createdDate}`);
             });
-            
+
             item.querySelector('.dashboard-rename-link').addEventListener('click', (e) => {
                 e.preventDefault();
                 this.automateDashboardRename(e.currentTarget.href);
@@ -2413,7 +2439,7 @@ class CloudflareManager {
             item.querySelector('[data-action="delete"]').addEventListener('click', () => {
                 this.confirmDeleteWorker(worker);
             });
-            
+
             list.appendChild(item);
         });
     }
@@ -2424,19 +2450,19 @@ class CloudflareManager {
     async loadPagesAndRender() {
         const pagesList = document.getElementById('pagesList');
         const pagesStatCard = document.getElementById('pagesStatCard');
-        
+
         try {
             pagesList.innerHTML = '<div class="loading">正在加载 Pages...</div>';
-            
+
             await this.loadPages();
-            
+
             // 更新统计
             pagesStatCard.style.display = 'flex';
             document.getElementById('pagesCount').textContent = `${this.pages.length} 个 Pages`;
-            
+
             this.renderPages();
             this.updateTabCounts();
-            
+
         } catch (error) {
             pagesList.innerHTML = `<div class="empty-state"><p>加载失败: ${this.escapeHtml(error.message)}</p></div>`;
         }
@@ -2464,7 +2490,7 @@ class CloudflareManager {
     renderPages() {
         const list = document.getElementById('pagesList');
         const filteredPages = this.getFilteredPages();
-        
+
         if (filteredPages.length === 0) {
             if (this.pagesSearchQuery) {
                 list.innerHTML = `
@@ -2489,9 +2515,9 @@ class CloudflareManager {
             }
             return;
         }
-        
+
         list.innerHTML = '';
-        
+
         // 如果有搜索关键词，显示搜索结果统计
         if (this.pagesSearchQuery) {
             const searchInfo = document.createElement('div');
@@ -2506,7 +2532,7 @@ class CloudflareManager {
             const pagesUrl = `https://${subdomain}.pages.dev`;
             const latestDeployment = page.latest_deployment;
             const deployStatus = latestDeployment?.latest_stage?.status || 'unknown';
-            
+
             const remark = this.getRemark('page', page.name);
             const alias = remark?.alias;
             const displayName = alias || page.name;
@@ -2559,7 +2585,7 @@ class CloudflareManager {
                     </button>
                 </div>
             `;
-            
+
             item.querySelector('[data-action="remark"]').addEventListener('click', (e) => {
                 this.handleRemarkButtonClick(e, 'page', page.name, page.name, pagesUrl);
             });
@@ -2567,7 +2593,7 @@ class CloudflareManager {
             item.querySelector('[data-action="rename"]').addEventListener('click', (e) => {
                 this.handleRemarkButtonClick(e, 'page', page.name, page.name, pagesUrl);
             });
-            
+
             item.querySelector('.dashboard-rename-link').addEventListener('click', (e) => {
                 e.preventDefault();
                 this.automateDashboardRename(e.currentTarget.href);
@@ -2576,7 +2602,7 @@ class CloudflareManager {
             item.querySelector('[data-action="delete"]').addEventListener('click', () => {
                 this.confirmDeletePages(page);
             });
-            
+
             list.appendChild(item);
         });
     }
@@ -2586,7 +2612,7 @@ class CloudflareManager {
             this.showToast('没有可导出的 Pages', 'warning');
             return;
         }
-        
+
         const headers = ['Name', 'Subdomain', 'URL', 'Created'];
         const rows = this.pages.map(p => [
             p.name,
@@ -2594,10 +2620,10 @@ class CloudflareManager {
             `https://${p.subdomain || p.name}.pages.dev`,
             p.created_on || ''
         ]);
-        
+
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-        const filename = `pages_${new Date().toISOString().slice(0,10)}.csv`;
-        
+        const filename = `pages_${new Date().toISOString().slice(0, 10)}.csv`;
+
         const result = await this.downloadCSV(csv, filename);
     }
 
@@ -2607,7 +2633,7 @@ class CloudflareManager {
     showDeploymentModal(type, item) {
         this.deployingType = type;
         this.deployingItem = item;
-        
+
         const modal = document.getElementById('deployModal');
         const pagesOptions = document.getElementById('pagesDeployOptions');
         const workersOptions = document.getElementById('workersDeployOptions');
@@ -2648,7 +2674,7 @@ class CloudflareManager {
                 this.showToast('请输入或上传脚本内容', 'warning');
                 return;
             }
-            
+
             await this.uploadWorkerScript(this.deployingItem, code);
         }
         this.hideDeployModal();
@@ -2680,7 +2706,7 @@ class CloudflareManager {
             const body = { branch };
             await this.apiRequest(`/accounts/${accountId}/pages/projects/${page.name}/deployments`, 'POST', body);
             this.showToast(`Pages 部署已触发: ${page.name} (${branch})`, 'success');
-            
+
             setTimeout(() => this.loadPagesAndRender(), 2000);
         } catch (error) {
             console.error('Pages deployment failed:', error);
@@ -2699,12 +2725,12 @@ class CloudflareManager {
 
         try {
             this.showLoading();
-            
+
             // 对 Worker 来说，“新建部署”意味着上传脚本并发布
             // 1. 上传脚本/创建新版本
             // 注意：Cloudflare API 的 Worker 上传通常需要 application/javascript 或 multipart/form-data
             const url = `/accounts/${accountId}/workers/scripts/${worker.id}`;
-            
+
             // 简单的脚本上传 (Module 模式需要更复杂的 multipart)
             // 这里尝试使用 text/javascript 方式，或者包装成 FormData
             const formData = new FormData();
@@ -2716,7 +2742,7 @@ class CloudflareManager {
 
             await this.apiRequest(url, 'PUT', formData);
             this.showToast(`Worker 脚本已更新并发布: ${worker.id}`, 'success');
-            
+
             setTimeout(() => this.loadWorkersAndRender(), 2000);
         } catch (error) {
             console.error('Worker upload failed:', error);
@@ -2779,7 +2805,7 @@ class CloudflareManager {
     // =====================================================
     // Utility Methods
     // =====================================================
-    
+
     /**
      * 使用 <a> 标签下载 CSV 文件
      */
@@ -2789,7 +2815,7 @@ class CloudflareManager {
             const BOM = '\uFEFF';
             const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
-            
+
             // 使用 <a> 标签下载
             const a = document.createElement('a');
             a.href = url;
@@ -2797,15 +2823,15 @@ class CloudflareManager {
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            
+
             setTimeout(() => {
                 URL.revokeObjectURL(url);
             }, 1000);
-            
+
             resolve({ success: true, filename: filename });
         });
     }
-    
+
     /**
      * 使用 chrome.downloads API 下载 JSON 文件
      * @returns {Promise<{success: boolean, filename?: string}>}
@@ -2816,7 +2842,7 @@ class CloudflareManager {
             const jsonString = JSON.stringify(data, null, 2);
             const blob = new Blob([jsonString], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
-            
+
             // 使用 <a> 标签下载，确保文件名正确
             const a = document.createElement('a');
             a.href = url;
@@ -2824,16 +2850,16 @@ class CloudflareManager {
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            
+
             // 延迟清理 URL
             setTimeout(() => {
                 URL.revokeObjectURL(url);
             }, 1000);
-            
+
             resolve({ success: true, filename: filename });
         });
     }
-    
+
     showLoading() {
         document.getElementById('loadingSection').style.display = 'flex';
     }
@@ -2846,7 +2872,7 @@ class CloudflareManager {
         const toast = document.getElementById('toast');
         toast.textContent = message;
         toast.className = `toast ${type} show`;
-        
+
         setTimeout(() => {
             toast.classList.remove('show');
         }, 3000);
@@ -2861,7 +2887,7 @@ class CloudflareManager {
     // =====================================================
     // Remarks Methods - 资源备注管理
     // =====================================================
-    
+
     /**
      * 加载备注数据
      */
@@ -2873,7 +2899,7 @@ class CloudflareManager {
             });
         });
     }
-    
+
     /**
      * 保存备注数据到存储
      */
@@ -2895,7 +2921,7 @@ class CloudflareManager {
     getRemarkKey(type, id) {
         return `${type}:${id}`;
     }
-    
+
     /**
      * 检查是否有备注
      */
@@ -2903,7 +2929,7 @@ class CloudflareManager {
         const key = this.getRemarkKey(type, id);
         return this.remarks[key] && this.remarks[key].content;
     }
-    
+
     /**
      * 获取备注
      */
@@ -2911,27 +2937,27 @@ class CloudflareManager {
         const key = this.getRemarkKey(type, id);
         return this.remarks[key] || null;
     }
-    
+
     /**
      * 更新备注统计卡片
      */
     updateNotesStatCard() {
         const remarksCount = Object.values(this.remarks).filter(r => r.content).length;
-        
+
         const notesStatCard = document.getElementById('notesStatCard');
         const notesCountEl = document.getElementById('notesCount');
-        
+
         if (notesStatCard) {
             notesStatCard.style.display = 'flex';
         }
         if (notesCountEl) {
             notesCountEl.textContent = `${remarksCount} 条备注`;
         }
-        
+
         // 更新标签页中的统计数字
         this.updateTabCounts();
     }
-    
+
     /**
      * 更新标签页中的统计数字
      */
@@ -2941,16 +2967,16 @@ class CloudflareManager {
         const tabWorkersCount = document.getElementById('tabWorkersCount');
         const tabPagesCount = document.getElementById('tabPagesCount');
         const tabNotesCount = document.getElementById('tabNotesCount');
-        
+
         if (tabZoneCount) tabZoneCount.textContent = this.zones.length;
         if (tabDnsCount) tabDnsCount.textContent = this.allRecords.length;
         if (tabWorkersCount) tabWorkersCount.textContent = this.workers.length;
         if (tabPagesCount) tabPagesCount.textContent = this.pages.length;
-        
+
         const remarksCount = Object.values(this.remarks).filter(r => r.content).length;
         if (tabNotesCount) tabNotesCount.textContent = remarksCount;
     }
-    
+
     /**
      * 生成备注tooltip HTML
      */
@@ -2959,11 +2985,11 @@ class CloudflareManager {
         if (!remark || !remark.content) {
             return '';
         }
-        
+
         // 截取内容预览（最多100字符）
         // Tooltip中不再进行 character-based 截断，防止破坏 Markdown 语法
         const remarkText = remark.content;
-        
+
         // 生成标签HTML
         let tagsHtml = '';
         if (remark.tags && remark.tags.length > 0) {
@@ -2973,7 +2999,7 @@ class CloudflareManager {
                 </div>
             `;
         }
-        
+
         // 渲染 Markdown
         let renderedContent = '';
         if (typeof marked !== 'undefined') {
@@ -2990,13 +3016,13 @@ class CloudflareManager {
                 .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>')
                 .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:100%">');
         }
-        
+
         return `
             <div class="remark-tooltip-content markdown-body">${renderedContent}</div>
             ${tagsHtml}
         `;
     }
-    
+
     /**
      * 处理备注按钮点击
      */
@@ -3010,7 +3036,7 @@ class CloudflareManager {
      */
     getRemarkButtonHtml(type, id, title = '添加备注') {
         const hasRemark = this.hasRemark(type, id);
-        
+
         return `
             <button class="remark-btn ${hasRemark ? 'has-remark' : ''}" 
                     ${hasRemark ? '' : `title="${title}"`} 
@@ -3021,7 +3047,7 @@ class CloudflareManager {
             </button>
         `;
     }
-    
+
     /**
      * 打开备注弹窗
      */
@@ -3036,7 +3062,7 @@ class CloudflareManager {
 
     openRemarkModal(type, id, name, detail) {
         this.currentRemarkTarget = { type, id, name, detail };
-        
+
         // 设置弹窗标题和目标信息
         const typeLabels = {
             'zone': '域名',
@@ -3044,16 +3070,49 @@ class CloudflareManager {
             'worker': 'Worker',
             'page': 'Page'
         };
-        
-        document.getElementById('remarkModalTitle').textContent = 
+
+        document.getElementById('remarkModalTitle').textContent =
             this.hasRemark(type, id) ? '编辑备注' : '添加备注';
-        
+
+        // 查找账号信息
+        let accountInfoHtml = '';
+        let accountName = '';
+        let accountId = '';
+
+        if (type === 'zone' || type === 'dns') {
+            const zone = this.zones.find(z => z.id === (type === 'zone' ? id : this.currentRemarkTarget.zoneId));
+            if (zone && zone.account) {
+                accountName = zone.account.name;
+                accountId = zone.account.id;
+            }
+        } else if (type === 'worker') {
+            const worker = this.workers.find(w => w.id === id);
+            if (worker && worker.account) {
+                accountName = worker.account.name;
+                accountId = worker.account.id;
+            }
+        } else if (type === 'page') {
+            const page = this.pages.find(p => p.name === id);
+            if (page && page.account) {
+                accountName = page.account.name;
+                accountId = page.account.id;
+            }
+        }
+
+        if (accountName) {
+            const colorClass = this.getAccountColorClass(accountId);
+            accountInfoHtml = `<span class="account-tag ${colorClass}" style="margin-left: 8px; vertical-align: middle;">${this.escapeHtml(accountName)}</span>`;
+        }
+
         document.getElementById('remarkTargetInfo').innerHTML = `
             <div class="remark-target-type">${typeLabels[type] || type}</div>
-            <div class="remark-target-name">${this.escapeHtml(name)}</div>
+            <div class="remark-target-name" style="display: flex; align-items: center; flex-wrap: wrap;">
+                ${this.escapeHtml(name)}
+                ${accountInfoHtml}
+            </div>
             ${detail ? `<div class="remark-target-detail">${this.escapeHtml(detail)}</div>` : ''}
         `;
-        
+
         // 填入现有备注和别名
         const existingRemark = this.getRemark(type, id);
         document.getElementById('remarkContent').value = existingRemark?.content || '';
@@ -3065,11 +3124,11 @@ class CloudflareManager {
         if (renameSection) {
             renameSection.style.display = (type === 'worker' || type === 'page') ? 'block' : 'none';
         }
-        
+
         // 显示/隐藏删除按钮
-        document.getElementById('deleteRemarkBtn').style.display = 
+        document.getElementById('deleteRemarkBtn').style.display =
             existingRemark?.content ? 'inline-block' : 'none';
-        
+
         // 重置预览状态
         this.isPreviewing = false;
         const previewEl = document.getElementById('remarkPreview');
@@ -3084,13 +3143,13 @@ class CloudflareManager {
 
         // 显示弹窗
         document.getElementById('remarkModal').style.display = 'flex';
-        
+
         // 聚焦到内容输入框
         setTimeout(() => {
             document.getElementById('remarkContent').focus();
         }, 100);
     }
-    
+
     /**
      * 关闭备注弹窗
      */
@@ -3101,7 +3160,7 @@ class CloudflareManager {
         document.getElementById('remarkTags').value = '';
         document.getElementById('projectAlias').value = '';
     }
-    
+
     /**
      * 保存备注
      */
@@ -3109,15 +3168,15 @@ class CloudflareManager {
         if (!this.currentRemarkTarget) {
             return;
         }
-        
+
         const { type, id, name } = this.currentRemarkTarget;
         const content = document.getElementById('remarkContent').value.trim();
         const alias = document.getElementById('projectAlias').value.trim();
         const tagsStr = document.getElementById('remarkTags').value.trim();
         const tags = tagsStr ? tagsStr.split(',').map(t => t.trim()).filter(t => t) : [];
-        
+
         const key = this.getRemarkKey(type, id);
-        
+
         if (content || alias) {
             this.remarks[key] = {
                 content,
@@ -3126,25 +3185,27 @@ class CloudflareManager {
                 updatedAt: new Date().toISOString(),
                 type,
                 id,
-                name: name || id  // 保存名称，如果没有则使用 id
+                name: name || id,  // 保存名称，如果没有则使用 id
+                accountId: this.currentAccount?.id || null,
+                accountName: this.currentAccount?.name || '未知账号'
             };
         } else {
             // 如果内容和别名都为空，删除备注
             delete this.remarks[key];
         }
-        
+
         try {
             await this.saveRemarksToStorage();
             this.showToast('备注已保存', 'success');
             this.closeRemarkModal();
-            
+
             // 重新渲染当前视图以更新备注图标状态
             this.refreshCurrentView();
         } catch (error) {
             this.showToast('保存备注失败: ' + error.message, 'error');
         }
     }
-    
+
     /**
      * 删除备注
      */
@@ -3152,34 +3213,34 @@ class CloudflareManager {
         if (!this.currentRemarkTarget) {
             return;
         }
-        
+
         if (!confirm('确定要删除这条备注吗？')) {
             return;
         }
-        
+
         const { type, id } = this.currentRemarkTarget;
         const key = this.getRemarkKey(type, id);
-        
+
         delete this.remarks[key];
-        
+
         try {
             await this.saveRemarksToStorage();
-            
+
             // 记录删除操作以便同步
             if (this.githubSync?.config?.enabled) {
                 await this.githubSync.recordDeletion(key);
             }
-            
+
             this.showToast('备注已删除', 'success');
             this.closeRemarkModal();
-            
+
             // 重新渲染当前视图
             this.refreshCurrentView();
         } catch (error) {
             this.showToast('删除备注失败: ' + error.message, 'error');
         }
     }
-    
+
     /**
      * 刷新当前视图
      */
@@ -3198,40 +3259,109 @@ class CloudflareManager {
                 this.loadRemarksAndRender();
                 break;
         }
-        
+
         // 更新备注统计卡片
         this.updateNotesStatCard();
     }
-    
+
     /**
      * 加载并渲染备注列表
      */
     async loadRemarksAndRender() {
         const remarksList = document.getElementById('remarksList');
         const emptyState = document.getElementById('remarksEmptyState');
-        
+
         // 确保先加载备注数据
         await this.loadRemarks();
-        
-        console.log('[Remarks] Loading remarks, count:', Object.keys(this.remarks).length);
-        
+
+
+        // 1. 深度加载链式检查：必须先确保域名加载完成（用于发现所有账号），然后再加载 Worker/Page
+        const triggerLoading = async () => {
+            if (this.zones.length === 0 && !this.isLoadingZones) {
+                console.log('[Remarks] Priority Loading: Zones...');
+                await this.loadZones();
+            }
+            if (this.workers.length === 0 && !this.isLoadingWorkers) {
+                console.log('[Remarks] Priority Loading: Workers...');
+                this.loadWorkers(); // 异步触发，不阻塞渲染
+            }
+            if (this.pages.length === 0 && !this.isLoadingPages) {
+                console.log('[Remarks] Priority Loading: Pages...');
+                this.loadPages(); // 异步触发，不阻塞渲染
+            }
+        };
+        triggerLoading();
+
+        console.log('[Remarks] RESOURCE STATUS:', {
+            zones: this.zones.length, 
+            isLoadingZones: this.isLoadingZones,
+            workers: this.workers.length, 
+            isLoadingWorkers: this.isLoadingWorkers,
+            pages: this.pages.length, 
+            isLoadingPages: this.isLoadingPages,
+            retryCount: this.remarksRetryCount
+        });
+
+        // 2. 智能多次重试机制：持续检测直到资源加载完成（最多 5 次）
+        const anyLoading = this.isLoadingZones || this.isLoadingWorkers || this.isLoadingPages;
+        // 如果列表为空且存在对应分类的备注，说明匹配池尚未就绪
+        const hasWorkerRemarks = Object.keys(this.remarks).some(k => k.startsWith('worker:'));
+        const hasPageRemarks = Object.keys(this.remarks).some(k => k.startsWith('page:'));
+        const pendingData = (this.workers.length === 0 && hasWorkerRemarks) || (this.pages.length === 0 && hasPageRemarks);
+
+        if ((anyLoading || pendingData) && !this.remarksReloadRegistered && this.remarksRetryCount < this.remarksMaxRetries) {
+            this.remarksRetryCount++;
+            console.log(`[Remarks] Data pending (Loading: ${anyLoading}, MissingPool: ${pendingData}). Scheduling reload #${this.remarksRetryCount}/${this.remarksMaxRetries}...`);
+            this.remarksReloadRegistered = true;
+            
+            // 只要还在等待重试，就显示加载状态并强制返回，避免显示部分不完整数据
+            remarksList.innerHTML = '<div class="loading">正在全量拉取各账号资源数据，请稍候... (尝试次数: ' + this.remarksRetryCount + ')</div>';
+            
+            setTimeout(() => {
+                this.remarksReloadRegistered = false;
+                if (this.currentTab === 'remarks') {
+                    this.loadRemarksAndRender();
+                }
+            }, 3000); 
+            return; // 强制拦截渲染，直到资源就绪或重试上限
+        }
+
+        // 3. 如果加载已完成或达到最大重试次数，重置计数器并继续渲染
+        if (!anyLoading && !pendingData) {
+            this.remarksRetryCount = 0;
+            console.log('[Remarks] All resources loaded successfully!');
+        } else if (this.remarksRetryCount >= this.remarksMaxRetries) {
+            console.warn('[Remarks] Max retries reached, rendering with available data...');
+            this.remarksRetryCount = 0;
+        }
+
         // 将 remarks 对象转换为数组
         const remarksArray = Object.entries(this.remarks)
-            .map(([key, value]) => ({
-                key,
-                ...value
-            }))
+            .map(([key, value]) => {
+                // 存量数据补全：如果缺失 type 或 id，从 key (format: "type:id") 中解析
+                if (!value.type || !value.id) {
+                    const parts = key.split(':');
+                    if (parts.length >= 2) {
+                        value.type = value.type || parts[0];
+                        value.id = value.id || parts.slice(1).join(':');
+                    }
+                }
+                return {
+                    key,
+                    ...value
+                };
+            })
             .filter(r => r.content) // 过滤掉空备注
             .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)); // 按时间排序
-        
+
         console.log('[Remarks] Remarks array:', remarksArray);
-        
+
         // 应用过滤
         const filtered = this.getFilteredRemarks(remarksArray);
-        
+
         // 更新统计
         this.updateRemarksStats(remarksArray);
-        
+
         // 更新笔记统计卡片
         const notesStatCard = document.getElementById('notesStatCard');
         if (notesStatCard) {
@@ -3240,16 +3370,16 @@ class CloudflareManager {
                 statNumberEl.textContent = remarksArray.length + ' 条备注';
             }
         }
-        
+
         if (filtered.length === 0) {
             remarksList.innerHTML = '';
             emptyState.style.display = 'block';
             return;
         }
-        
+
         emptyState.style.display = 'none';
         remarksList.innerHTML = '';
-        
+
         // 按类型分组
         const grouped = {};
         filtered.forEach(remark => {
@@ -3259,14 +3389,14 @@ class CloudflareManager {
             }
             grouped[type].push(remark);
         });
-        
+
         const typeLabels = {
             'zone': '🌐 域名',
             'dns': '📡 DNS 记录',
             'worker': '⚡ Workers',
             'page': '📄 Pages'
         };
-        
+
         Object.entries(grouped).forEach(([type, remarks]) => {
             const groupDiv = document.createElement('div');
             groupDiv.className = 'remarks-group';
@@ -3276,29 +3406,105 @@ class CloudflareManager {
                     <span class="remarks-group-count">${remarks.length}</span>
                 </div>
             `;
-            
+
             const listDiv = document.createElement('div');
             listDiv.className = 'remarks-group-list';
-            
+
             remarks.forEach(remark => {
                 const item = document.createElement('div');
                 item.className = 'remark-list-item';
-                
-                const tagsHtml = remark.tags && remark.tags.length > 0 
-                    ? `<div class="remark-item-tags">${remark.tags.map(t => `<span class="remark-item-tag">${this.escapeHtml(t)}</span>`).join('')}</div>` 
+
+                const tagsHtml = remark.tags && remark.tags.length > 0
+                    ? `<div class="remark-item-tags">${remark.tags.map(t => `<span class="remark-item-tag">${this.escapeHtml(t)}</span>`).join('')}</div>`
                     : '';
-                
-                const dateStr = remark.updatedAt 
+
+                const dateStr = remark.updatedAt
                     ? new Date(remark.updatedAt).toLocaleString('zh-CN')
                     : '';
-                
+
                 // 优先级: 别名 > 原始名称 > ID
                 const displayName = remark.alias || remark.name || remark.id;
-                
+
+                let accountTagHtml = '';
+                let finalAccountName = remark.accountName;
+                let finalAccountId = remark.accountId;
+
+                // 如果缺失账号信息，尝试从已加载的资源中匹配
+                if (!finalAccountName || finalAccountName === '未知账号') {
+                    if (remark.type === 'zone' || remark.type === 'dns') {
+                        // 尝试匹配 zone ID
+                        const targetZoneId = remark.type === 'zone' ? remark.id : remark.zoneId;
+                        const zone = this.zones.find(z => z.id === targetZoneId);
+                        if (zone && zone.account) {
+                            finalAccountName = zone.account.name;
+                            finalAccountId = zone.account.id;
+                        } else if (remark.type === 'dns') {
+                            // DNS 特殊情况：如果 this.zones 里没找到，尝试在 this.records 相关的域里找
+                            const parentZone = this.zones.find(z => remark.name && remark.name.endsWith(z.name));
+                            if (parentZone && parentZone.account) {
+                                finalAccountName = parentZone.account.name;
+                                finalAccountId = parentZone.account.id;
+                            }
+                        }
+                    } else if (remark.type === 'worker') {
+                        // Worker 匹配策略：全面覆盖 id, name, tag 以及 alias
+                        const searchId = (remark.id || '').toLowerCase().trim();
+                        const searchName = (remark.name || '').toLowerCase().trim();
+                        
+                        const worker = this.workers.find(w => {
+                            const wId = (w.id || '').toLowerCase().trim();
+                            const wName = (w.name || '').toLowerCase().trim();
+                            return wId === searchId || wName === searchId || wId === searchName || wName === searchName;
+                        });
+
+                        if (worker && worker.account) {
+                            finalAccountName = worker.account.name;
+                            finalAccountId = worker.account.id;
+                        } else {
+                            // 诊断日志：如果是第一个失败的，输出匹配池样例
+                            if (remark.id === 'joey-cfnew-2-9-1' || remarks.indexOf(remark) === 0) {
+                                console.warn(`[Remarks] Worker Match Failed for "${remark.id}". Pool size: ${this.workers.length}. Sample ID from pool: ${this.workers.length > 0 ? this.workers[0].id : 'EMPTY'}`);
+                                if (this.workers.length > 0 && remarks.indexOf(remark) === 0) {
+                                     console.log('[Remarks] Worker Pool IDs:', this.workers.slice(0, 5).map(w => w.id));
+                                }
+                            }
+                        }
+                    } else if (remark.type === 'page') {
+                        // Page 匹配策略
+                        const searchId = (remark.id || '').toLowerCase().trim();
+                        const searchName = (remark.name || '').toLowerCase().trim();
+                        
+                        const page = this.pages.find(p => {
+                            const pId = (p.id || '').toLowerCase().trim();
+                            const pName = (p.name || '').toLowerCase().trim();
+                            return pId === searchId || pName === searchId || pId === searchName || pName === searchName;
+                        });
+                        if (page && page.account) {
+                            finalAccountName = page.account.name;
+                            finalAccountId = page.account.id;
+                        }
+                    }
+                }
+
+                if (finalAccountName) {
+                    const colorClass = this.getAccountColorClass(finalAccountId);
+                    // 仅记录一次成功匹配，避免刷屏
+                    if (remarks.indexOf(remark) === 0) console.log(`[Remarks] ${type} MATCH OK: ${finalAccountName}`);
+                    accountTagHtml = `<span class="account-tag ${colorClass}" style="margin-left: 8px !important; display: inline-block !important; padding: 2px 6px !important; border-radius: 4px !important; font-size: 11px !important; line-height: 1 !important; color: white !important; vertical-align: middle !important;">${this.escapeHtml(finalAccountName)}</span>`;
+                } else {
+                    // 如果列表已经加载但还是没匹配到，输出一下首个资源看看 ID 对不对
+                    if (remark.type === 'worker' && this.workers.length > 0 && remarks.indexOf(remark) === 0) {
+                        console.warn(`[Remarks] Worker Match Failed! Remark ID: "${remark.id}". First Worker ID in list: "${this.workers[0].id}"`);
+                    }
+                }
+
                 item.innerHTML = `
-                    <div class="remark-item-header">
-                        <span class="remark-item-name">${this.escapeHtml(displayName)}</span>
-                        <span class="remark-item-date">${dateStr}</span>
+                    <div class="remark-item-header" style="display: flex !important; justify-content: space-between !important; align-items: flex-start !important; gap: 10px !important; margin-bottom: 8px !important;">
+                        <div class="remark-item-title-row" style="flex: 1 !important; display: flex !important; align-items: center !important; flex-wrap: wrap !important; gap: 4px !important;">
+                            <span class="remark-item-name" style="font-weight: 600 !important; font-size: 14px !important; color: var(--text-main) !important;">${this.escapeHtml(displayName)}</span>
+                            ${accountTagHtml}
+                        </div>
+                        <span class="remark-item-date" style="white-space: nowrap !important; font-size: 11px !important; opacity: 0.6 !important;">${dateStr}</span>
                     </div>
                     <div class="remark-item-content markdown-body">${typeof marked !== 'undefined' ? marked.parse(remark.content) : this.escapeHtml(remark.content)}</div>
                     ${tagsHtml}
@@ -3307,11 +3513,11 @@ class CloudflareManager {
                         <button class="btn-sm btn-danger" data-action="delete">删除</button>
                     </div>
                 `;
-                
+
                 item.querySelector('[data-action="edit"]').addEventListener('click', () => {
                     this.openRemarkModal(remark.type, remark.id, displayName, '');
                 });
-                
+
                 item.querySelector('[data-action="delete"]').addEventListener('click', async () => {
                     if (confirm('确定要删除这条备注吗？')) {
                         delete this.remarks[remark.key];
@@ -3320,15 +3526,15 @@ class CloudflareManager {
                         this.loadRemarksAndRender();
                     }
                 });
-                
+
                 listDiv.appendChild(item);
             });
-            
+
             groupDiv.appendChild(listDiv);
             remarksList.appendChild(groupDiv);
         });
     }
-    
+
     /**
      * 获取过滤后的备注
      */
@@ -3338,22 +3544,25 @@ class CloudflareManager {
             if (this.remarksTypeFilter && remark.type !== this.remarksTypeFilter) {
                 return false;
             }
-            
+
             // 搜索过滤
             if (this.remarksSearchQuery) {
                 const query = this.remarksSearchQuery.toLowerCase();
-                const matchId = remark.id?.toLowerCase().includes(query);
-                const matchContent = remark.content?.toLowerCase().includes(query);
-                const matchTags = remark.tags?.some(t => t.toLowerCase().includes(query));
-                if (!matchId && !matchContent && !matchTags) {
-                    return false;
-                }
+                const content = (remark.content || '').toLowerCase();
+                const alias = (remark.alias || '').toLowerCase();
+                const id = (remark.id || '').toLowerCase();
+                const name = (remark.name || '').toLowerCase();
+                
+                return content.includes(query) || 
+                       alias.includes(query) || 
+                       id.includes(query) || 
+                       name.includes(query);
             }
-            
+
             return true;
         });
     }
-    
+
     /**
      * 更新备注统计
      */
@@ -3363,14 +3572,14 @@ class CloudflareManager {
         const dnsEl = document.getElementById('dnsRemarksCount');
         const workerEl = document.getElementById('workerRemarksCount');
         const pageEl = document.getElementById('pageRemarksCount');
-        
+
         if (totalEl) totalEl.textContent = remarksArray.length;
         if (zoneEl) zoneEl.textContent = remarksArray.filter(r => r.type === 'zone').length;
         if (dnsEl) dnsEl.textContent = remarksArray.filter(r => r.type === 'dns').length;
         if (workerEl) workerEl.textContent = remarksArray.filter(r => r.type === 'worker').length;
         if (pageEl) pageEl.textContent = remarksArray.filter(r => r.type === 'page').length;
     }
-    
+
     /**
      * 处理备注搜索
      */
@@ -3378,7 +3587,7 @@ class CloudflareManager {
         this.remarksSearchQuery = query.trim();
         this.loadRemarksAndRender();
     }
-    
+
     /**
      * 处理备注类型过滤
      */
@@ -3386,7 +3595,7 @@ class CloudflareManager {
         this.remarksTypeFilter = type;
         this.loadRemarksAndRender();
     }
-    
+
     /**
      * 导出备注
      */
@@ -3397,17 +3606,17 @@ class CloudflareManager {
                 ...value
             }))
             .filter(r => r.content);
-        
+
         if (remarksArray.length === 0) {
             this.showToast('没有可导出的备注', 'warning');
             return;
         }
-        
+
         const data = {
             exportDate: new Date().toISOString(),
             remarks: remarksArray
         };
-        
+
         // 获取账户名称
         let accountName = 'cloudflare';
         if (this.currentAccount?.id) {
@@ -3424,7 +3633,7 @@ class CloudflareManager {
             }
         }
         const safeAccountName = accountName.replace(/[<>:"/\\|?*]/g, '_');
-        
+
         // 生成日期时间
         const now = new Date();
         const dateTime = now.getFullYear().toString() +
@@ -3433,11 +3642,11 @@ class CloudflareManager {
             now.getHours().toString().padStart(2, '0') +
             now.getMinutes().toString().padStart(2, '0') +
             now.getSeconds().toString().padStart(2, '0');
-        
+
         const filename = `${safeAccountName}-remark-${dateTime}.json`;
         const result = await this.downloadJSON(data, filename);
     }
-    
+
     /**
      * 获取账户名称和日期时间用于文件名
      */
@@ -3457,7 +3666,7 @@ class CloudflareManager {
             }
         }
         const safeAccountName = accountName.replace(/[<>:"/\\|?*]/g, '_');
-        
+
         const now = new Date();
         const dateTime = now.getFullYear().toString() +
             (now.getMonth() + 1).toString().padStart(2, '0') +
@@ -3465,10 +3674,10 @@ class CloudflareManager {
             now.getHours().toString().padStart(2, '0') +
             now.getMinutes().toString().padStart(2, '0') +
             now.getSeconds().toString().padStart(2, '0');
-        
+
         return suffix ? `${safeAccountName}-${suffix}-${dateTime}.json` : `${safeAccountName}-${dateTime}.json`;
     }
-    
+
     /**
      * 导出 DNS 数据
      */
@@ -3477,7 +3686,7 @@ class CloudflareManager {
             this.showToast('没有可导出的 DNS 记录', 'warning');
             return;
         }
-        
+
         const data = {
             exportDate: new Date().toISOString(),
             zones: this.zones.map(z => ({
@@ -3494,11 +3703,11 @@ class CloudflareManager {
                 proxied: r.proxied
             }))
         };
-        
+
         const filename = this.getExportFilename('dns');
         await this.downloadJSON(data, filename);
     }
-    
+
     /**
      * 导出 Workers 数据
      */
@@ -3507,7 +3716,7 @@ class CloudflareManager {
             this.showToast('没有可导出的 Workers', 'warning');
             return;
         }
-        
+
         const data = {
             exportDate: new Date().toISOString(),
             workers: this.workers.map(w => ({
@@ -3516,11 +3725,11 @@ class CloudflareManager {
                 modified_on: w.modified_on
             }))
         };
-        
+
         const filename = this.getExportFilename('workers');
         await this.downloadJSON(data, filename);
     }
-    
+
     /**
      * 导出 Pages 数据
      */
@@ -3529,7 +3738,7 @@ class CloudflareManager {
             this.showToast('没有可导出的 Pages', 'warning');
             return;
         }
-        
+
         const data = {
             exportDate: new Date().toISOString(),
             pages: this.pages.map(p => ({
@@ -3539,7 +3748,7 @@ class CloudflareManager {
                 created_on: p.created_on
             }))
         };
-        
+
         const filename = this.getExportFilename('pages');
         await this.downloadJSON(data, filename);
     }
@@ -3612,7 +3821,7 @@ class CloudflareManager {
         const previewEl = document.getElementById('remarkPreview');
         const contentEl = document.getElementById('remarkContent');
         const toggleBtn = document.getElementById('togglePreviewBtn');
-        
+
         this.isPreviewing = !this.isPreviewing;
 
         if (this.isPreviewing) {
@@ -3672,11 +3881,11 @@ class CloudflareManager {
 
         textarea.value = text.substring(0, start) + replacement + text.substring(end);
         textarea.focus();
-        
+
         // 设置光标位置
         const newPos = start + cursorOffset;
         textarea.setSelectionRange(newPos, newPos);
-        
+
         // 如果是预览模式，自动更新预览
         if (this.isPreviewing) {
             this.toggleMarkdownPreview(); // 刷新预览（先关再开最简单）
@@ -3704,22 +3913,22 @@ class CloudflareManager {
             const start = textarea.selectionStart;
             const end = textarea.selectionEnd;
             const text = textarea.value;
-            
+
             const replacement = `![图片描述](${dataUrl})`;
             textarea.value = text.substring(0, start) + replacement + text.substring(end);
-            
+
             // 触发 input 事件以可能的自动保存或其他逻辑
             textarea.dispatchEvent(new Event('input'));
-            
+
             if (this.isPreviewing) {
                 this.toggleMarkdownPreview();
                 this.toggleMarkdownPreview();
             }
-            
+
             this.showToast('图片上传成功', 'success');
         };
         reader.readAsDataURL(file);
-        
+
         // 重置 input 以便下次选择同一张图
         e.target.value = '';
     }

@@ -2949,3 +2949,85 @@ textarea::placeholder {
   line-height: 1.4;
   margin: 0;
 }
+
+/* =====================================================
+   Remark List Item Styles - 备注项样式
+   ===================================================== */
+.remark-list-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  transition: transform var(--transition-fast), border-color var(--transition-fast);
+}
+
+.remark-list-item:hover {
+  border-color: var(--border-light);
+  transform: translateY(-2px);
+}
+
+.remark-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--spacing-sm);
+  gap: var(--spacing-md);
+}
+
+.remark-item-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.remark-item-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.remark-item-account-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--info);
+  border: 1px solid rgba(88, 166, 255, 0.3);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.remark-item-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.remark-item-content {
+  margin-bottom: var(--spacing-sm);
+  word-break: break-all;
+}
+
+.remark-item-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: var(--spacing-sm);
+}
+
+.remark-item-tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border-radius: 4px;
+}
+
+.remark-item-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+}
