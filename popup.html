@@ -70,6 +70,11 @@
                 <div class="sidebar-section">
                     <h3>已保存账户</h3>
                     <div id="accountList" class="account-list"></div>
+                    <div class="sidebar-actions" style="margin-top: 10px; display: flex; gap: 8px;">
+                        <button id="exportAccountsBtn" class="btn-secondary btn-sm" style="flex: 1;" title="导出所有账户配置">📤 导出账户</button>
+                        <button id="importAccountsBtn" class="btn-secondary btn-sm" style="flex: 1;" title="导入账户配置">📥 导入账户</button>
+                    </div>
+                    <input type="file" id="importAccountsInput" accept=".json" style="display: none;">
                 </div>
                 
                 <!-- GitHub 同步设置 -->

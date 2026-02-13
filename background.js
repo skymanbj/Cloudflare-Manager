@@ -45,7 +45,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // 获取存储使用情况
     if (request.type === "GET_STORAGE_USAGE") {
       handleGetStorageUsage(sendResponse);
-      return true;
+      return true; // Keep channel open for async response
     }
   } catch (error) {
     console.error("[Background] Error handling message:", error);
@@ -64,16 +64,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function handleGetStorageUsage(sendResponse) {
   try {
     const bytesInUse = await chrome.storage.local.getBytesInUse(null);
-    
+
     const manifest = chrome.runtime.getManifest();
     const hasUnlimitedStorage = manifest.permissions && manifest.permissions.includes('unlimitedStorage');
-    
-    const QUOTA_BYTES = hasUnlimitedStorage 
+
+    const QUOTA_BYTES = hasUnlimitedStorage
       ? 1024 * 1024 * 1024  // 1GB
       : 5 * 1024 * 1024;    // 5MB
-    
+
     const percentage = Math.min(100, Math.round((bytesInUse / QUOTA_BYTES) * 100));
-    
+
     sendResponse({
       success: true,
       data: {
@@ -137,10 +137,10 @@ async function performBackgroundSync() {
 
     // 获取远程数据
     const remoteData = await getRemoteData(githubSyncConfig);
-    
+
     // 合并数据
     const merged = mergeRemarks(remarks, remoteData.remarks || {}, remoteData.deletedKeys || []);
-    
+
     // 保存到本地
     await chrome.storage.local.set({ cfRemarks: merged.remarks });
 
@@ -272,7 +272,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 /**
  * 扩展启动时恢复定时器
  */
-chrome.storage.local.get('githubSyncConfig', ({ githubSyncConfig }) => {
+chrome.storage.local.get('githubSyncConfig', (result) => {
+  const githubSyncConfig = result?.githubSyncConfig;
   if (githubSyncConfig?.enabled && githubSyncConfig?.timerSync) {
     setupSyncAlarm(githubSyncConfig.syncInterval || 30);
     console.log('[Sync] Restored sync alarm on startup');

@@ -16,8 +16,8 @@
     -   为域名、DNS 记录、Workers、Pages 添加详细备注。
     -   **Markdown 支持**：支持加粗、列表、链接、表格甚至本地图片上传。
     -   **项目别名**：支持为资源设置本地显示别名，方便直观识别。
--   **GitHub 云端同步**：通过 GitHub 仓库备份账户配置与备注数据，支持跨设备自动/手动同步。
--   **数据导出**：支持将所有统计数据、DNS 记录、备注信息导出为 JSON 或文本格式。
+-   **GitHub 云端同步**：通过 GitHub 仓库备份账号备注与配置数据，支持跨设备自动/手动同步。
+-   **数据导入导出**：支持将所有统计数据、DNS 记录、备注信息及 **账号配置**（含 API Token，需谨慎）导出为 JSON。
 
 ## 🛠️ 技术特点
 
@@ -47,8 +47,27 @@
 ### 3. GitHub 数据同步（可选）
 1. 创建一个私有 GitHub 仓库（建议）。
 2. 生成具有 `repo` 权限的 GitHub Personal Access Token。
+     GitHub Token 生成步骤（修复权限不足问题）
+
+     您的私有仓库只能通过Classic Token访问，且必须勾选repo权限。步骤如下：
+
+     登录 GitHub，点击右上角头像 -> Settings。
+     左侧菜单拉到底，选择 Developer settings。
+     点击 Personal access tokens -> Tokens (classic)。
+     (注意：不要选 Fine-grained tokens，选 Classic 更稳妥)
+     点击 Generate new token -> Generate new token (classic)。
+     Note: 随便填，如 Cloudflare Extension。
+     Expiration: 建议选 No expiration (永不过期)。
+     Select scopes (关键步骤):
+     必须勾选第一个复选框：repo (Full control of private repositories)。
+     如果没勾这个，扩展程序就看不到您的私有仓库，从而报错 404。
+     点击底部 Generate token。
+     复制显示出来的 Token（以 ghp_ 开头）。
+     最后一步： 回到扩展程序 -> Settings -> 将新的 Token 粘贴进去 -> Save Settings -> 点击 "从 GitHub 拉取"。
 3. 在侧边栏“GitHub 同步”区域配置 Token、仓库路径（用户名/仓库名）及分支。
 4. 开启“定时同步”可确保本地备注与配置定期备份到云端。
+
+
 
 ## 📝 贡献与反馈
 如果您在使用过程中遇到任何问题或有功能建议，欢迎提交 Issue。

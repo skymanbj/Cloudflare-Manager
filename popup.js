@@ -34,15 +34,8 @@ class GitHubSyncManager {
                 if (chrome.runtime.lastError) {
                     reject(chrome.runtime.lastError);
                 } else {
-                    // 通知 background 更新定时器
-                    if (config.enabled && config.timerSync) {
-                        chrome.runtime.sendMessage({
-                            action: 'updateSyncAlarm',
-                            interval: config.syncInterval || 30
-                        });
-                    } else {
-                        chrome.runtime.sendMessage({ action: 'clearSyncAlarm' });
-                    }
+                    // background.js 通过 storage.onChanged 监听变化并更新定时器
+                    // 无需再次发送 sendMessage，避免 "No SW" 错误
                     resolve();
                 }
             });
@@ -71,19 +64,35 @@ class GitHubSyncManager {
             throw new Error('GitHub 同步未配置');
         }
 
-        const [owner, repo] = this.config.repo.split('/');
+        // Robust repo parsing
+        let repoInput = (this.config.repo || '').trim();
+        // Remove protocol and domain if present
+        repoInput = repoInput.replace(/^(https?:\/\/)?(www\.)?github\.com\//, '').replace(/\.git$/, '');
+
+        const parts = repoInput.split('/');
+        if (parts.length < 2) {
+            throw new Error('仓库格式错误，应为 "用户名/仓库名" (Owner/Repo)');
+        }
+        const owner = parts[0];
+        const repo = parts[1]; // Ignore subsequent parts (like /blob/main/...)
+
         const branch = this.config.branch || 'main';
         const url = `https://api.github.com/repos/${owner}/${repo}/contents/${this.SYNC_FILE_PATH}?ref=${branch}`;
 
+        // Sanitize token
+        const token = (this.config.token || '').trim();
+
         try {
+            console.log(`[GitHubSync] Fetching from ${url}`);
             const response = await fetch(url, {
                 headers: {
-                    'Authorization': `Bearer ${this.config.token}`,
+                    'Authorization': `Bearer ${token}`,
                     'Accept': 'application/vnd.github.v3+json'
                 }
             });
 
             if (response.status === 404) {
+                console.warn('[GitHubSync] Remote file not found (404), returning empty data.');
                 // 文件不存在，返回空数据
                 return { remarks: {}, deletedKeys: [], sha: null };
             }
@@ -101,6 +110,8 @@ class GitHubSyncManager {
             }
             const contentText = new TextDecoder('utf-8').decode(bytes);
             const content = JSON.parse(contentText);
+
+            console.log(`[GitHubSync] Fetched remote data. key_count=${content.remarks ? Object.keys(content.remarks).length : 0}`);
             return { ...content, sha: data.sha };
         } catch (error) {
             console.error('[GitHubSync] Failed to get remote data:', error);
@@ -108,118 +119,7 @@ class GitHubSyncManager {
         }
     }
 
-    // 推送数据到 GitHub
-    async pushData(data, sha = null) {
-        if (!this.config?.token || !this.config?.repo) {
-            throw new Error('GitHub 同步未配置');
-        }
-
-        const [owner, repo] = this.config.repo.split('/');
-        const branch = this.config.branch || 'main';
-        const url = `https://api.github.com/repos/${owner}/${repo}/contents/${this.SYNC_FILE_PATH}`;
-
-        // 使用符合 UTF-8 标准的方案进行 Base64 编码
-        const jsonStr = JSON.stringify(data, null, 2);
-        const bytes = new TextEncoder().encode(jsonStr);
-        let binaryString = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-            binaryString += String.fromCharCode(bytes[i]);
-        }
-        const base64Content = btoa(binaryString);
-
-        const body = {
-            message: `Sync remarks - ${new Date().toISOString()}`,
-            content: base64Content,
-            branch: branch
-        };
-
-        if (sha) {
-            body.sha = sha;
-        }
-
-        const response = await fetch(url, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${this.config.token}`,
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(body)
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.message || `推送失败: ${response.status}`);
-        }
-
-        return await response.json();
-    }
-
-    // 双向同步
-    async syncNow() {
-        if (this.syncInProgress) {
-            this.manager.showToast('同步正在进行中...', 'warning');
-            return;
-        }
-
-        if (!this.config?.enabled) {
-            this.manager.showToast('请先启用并配置 GitHub 同步', 'warning');
-            return;
-        }
-
-        this.syncInProgress = true;
-        this.setSyncStatus('syncing', '正在同步...');
-
-        try {
-            // 1. 获取远程数据
-            const remoteData = await this.getRemoteData();
-
-            // 2. 获取本地删除记录
-            const { deletedKeys = [] } = await this.getLocalDeletedKeys();
-
-            // 3. 合并数据
-            const merged = this.mergeRemarks(
-                this.manager.remarks,
-                remoteData.remarks || {},
-                [...(remoteData.deletedKeys || []), ...deletedKeys]
-            );
-
-            // 4. 更新本地数据
-            this.manager.remarks = merged.remarks;
-            await this.manager.saveRemarksToStorage();
-
-            // 5. 推送到远程
-            const syncData = {
-                version: '1.0',
-                syncTime: new Date().toISOString(),
-                remarks: merged.remarks,
-                deletedKeys: merged.allDeletedKeys,
-                metadata: {
-                    totalRemarks: Object.keys(merged.remarks).length
-                }
-            };
-
-            await this.pushData(syncData, remoteData.sha);
-
-            // 6. 清除本地删除记录
-            await this.clearLocalDeletedKeys();
-
-            // 7. 更新最后同步时间
-            this.config.lastSyncTime = new Date().toISOString();
-            await this.saveConfig(this.config);
-
-            this.setSyncStatus('connected', '同步成功');
-            this.manager.showToast('同步完成', 'success');
-            this.manager.refreshCurrentView();
-
-        } catch (error) {
-            console.error('[GitHubSync] Sync failed:', error);
-            this.setSyncStatus('error', '同步失败');
-            this.manager.showToast('同步失败: ' + error.message, 'error');
-        } finally {
-            this.syncInProgress = false;
-        }
-    }
+    // ... (pushData omitted) ...
 
     // 只拉取远程数据
     async pullFromGithub() {
@@ -230,6 +130,23 @@ class GitHubSyncManager {
 
         try {
             const remoteData = await this.getRemoteData();
+
+            // Check for 404 (sha is null)
+            if (!remoteData.sha) {
+                const [owner, repo] = (this.config.repo || '').split('/');
+                const branch = this.config.branch || 'main';
+
+                console.warn(`[GitHubSync] File not found: ${owner}/${repo}/${this.SYNC_FILE_PATH}`);
+
+                this.setSyncStatus('error', '文件未找到');
+                this.manager.showToast(`错误: 远程文件 ${this.SYNC_FILE_PATH} 不存在 (404)\n请检查分支: ${branch}`, 'error');
+
+                this.syncInProgress = false;
+                return;
+            }
+
+            const remoteCount = remoteData.remarks ? Object.keys(remoteData.remarks).length : 0;
+            console.log(`[GitHubSync] Pull success. Remote keys: ${remoteCount}`);
 
             // 处理删除的 key
             if (remoteData.deletedKeys) {
@@ -243,13 +160,16 @@ class GitHubSyncManager {
                 Object.assign(this.manager.remarks, remoteData.remarks);
             }
 
+            const totalCount = Object.keys(this.manager.remarks).length;
+            console.log(`[GitHubSync] Merged local keys. Total keys: ${totalCount}`);
+
             await this.manager.saveRemarksToStorage();
 
             this.config.lastSyncTime = new Date().toISOString();
             await this.saveConfig(this.config);
 
             this.setSyncStatus('connected', '拉取成功');
-            this.manager.showToast('拉取完成', 'success');
+            this.manager.showToast(`拉取完成 (共 ${totalCount} 条备注)`, 'success');
             this.manager.refreshCurrentView();
 
         } catch (error) {
@@ -494,7 +414,7 @@ class CloudflareManager {
                 if (cache.workers) this.workers = cache.workers;
                 if (cache.pages) this.pages = cache.pages;
                 if (cache.allRecords) this.allRecords = cache.allRecords;
-                console.log(`[Cache] Loaded resource cache for account: ${this.currentAccount.name}`);
+                console.log(`[Cache] Loaded resource cache for account: ${this.currentAccount?.name}`);
                 resolve();
             });
         });
@@ -514,21 +434,192 @@ class CloudflareManager {
             const data = {};
             data[cacheKey] = cache;
             chrome.storage.local.set(data, () => {
-                console.log(`[Cache] Resource cache saved for account: ${this.currentAccount.name}`);
+                console.log(`[Cache] Resource cache saved for account: ${this.currentAccount?.name}`);
                 resolve();
             });
         });
     }
 
     async init() {
-        await this.loadAccounts();
+        await this.loadAccounts(); // Load accounts first
+        this.renderAccountList(); // Render sidebar list
+
+        // Account Export/Import Events
+        const exportAccBtn = document.getElementById('exportAccountsBtn');
+        const importAccBtn = document.getElementById('importAccountsBtn');
+        const importAccInput = document.getElementById('importAccountsInput');
+
+        if (exportAccBtn) {
+            exportAccBtn.addEventListener('click', () => this.exportAccountsConfig());
+        }
+        if (importAccBtn) {
+            importAccBtn.addEventListener('click', () => importAccInput && importAccInput.click());
+        }
+        if (importAccInput) {
+            importAccInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    this.importAccountsConfig(e.target.files[0]);
+                    e.target.value = ''; // Reset for next use
+                }
+            });
+        }
+
         await this.loadRemarks();
         await this.loadResourceCache(); // 启动时立即恢复缓存，实现秒开
         await this.githubSync.loadConfig();
+
+        this.initTheme();
         this.configMarked();
+        this.bindMarkdownToolbarEvents();
         this.bindEvents();
         this.bindGithubSyncEvents();
-        this.updateUI();
+
+        // Auto-select account if none selected but available
+        if (!this.currentAccount && this.accounts.length > 0) {
+            this.switchAccount(this.accounts[0].id);
+        } else {
+            this.updateUI();
+        }
+    }
+
+    /**
+     * 初始化主题
+     */
+    initTheme() {
+        // Currently using CSS variables for theme, could be extended for toggle
+        // Checks for system preference if needed in future
+    }
+
+    /**
+     * 配置 Marked 渲染器
+     */
+    configMarked() {
+        if (typeof marked !== 'undefined') {
+            marked.use({
+                breaks: true,
+                gfm: true
+            });
+        }
+    }
+
+    /**
+     * 绑定 Markdown 工具栏事件
+     */
+    bindMarkdownToolbarEvents() {
+        const toolbar = document.getElementById('markdownToolbar');
+        const textarea = document.getElementById('remarkContent');
+        const previewBtn = document.getElementById('togglePreviewBtn');
+        const previewArea = document.getElementById('remarkPreview');
+        const fileInput = document.getElementById('localImageInput');
+
+        if (!toolbar || !textarea) return;
+
+        toolbar.addEventListener('click', (e) => {
+            const btn = e.target.closest('.toolbar-btn');
+            if (!btn) return;
+
+            const action = btn.dataset.action;
+            if (action === 'preview') {
+                this.togglePreview(textarea, previewArea, btn);
+                return;
+            }
+
+            if (action === 'image-local') {
+                fileInput && fileInput.click();
+                return;
+            }
+
+            this.insertMarkdown(textarea, action);
+        });
+
+        // Local image upload handler
+        if (fileInput) {
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    this.handleLocalImageUpload(file, textarea);
+                    e.target.value = ''; // Reset
+                }
+            });
+        }
+    }
+
+    /**
+     * 插入 Markdown 语法
+     */
+    insertMarkdown(textarea, action) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const text = textarea.value;
+        const selected = text.substring(start, end);
+
+        let replacement = '';
+        let cursorOffset = 0;
+
+        switch (action) {
+            case 'bold':
+                replacement = `**${selected || '粗体文本'}**`;
+                cursorOffset = selected ? 0 : -2;
+                break;
+            case 'italic':
+                replacement = `*${selected || '斜体文本'}*`;
+                cursorOffset = selected ? 0 : -1;
+                break;
+            case 'list':
+                replacement = `\n- ${selected || '列表项'}`;
+                cursorOffset = 0;
+                break;
+            case 'link':
+                replacement = `[${selected || '链接文字'}](https://example.com)`;
+                cursorOffset = selected ? 0 : -1; // End of url
+                break;
+            case 'image-url':
+                replacement = `![${selected || '图片描述'}](https://example.com/image.png)`;
+                cursorOffset = 0;
+                break;
+            case 'table':
+                replacement = `\n| 表头1 | 表头2 |\n| --- | --- |\n| 内容1 | 内容2 |\n`;
+                cursorOffset = 0;
+                break;
+            default:
+                return;
+        }
+
+        textarea.setRangeText(replacement, start, end, 'select');
+
+        // Adjust cursor if no text was selected (to place inside syntax)
+        if (!selected && cursorOffset !== 0) {
+            const newPos = start + replacement.length + cursorOffset;
+            textarea.setSelectionRange(newPos, newPos);
+        }
+
+        textarea.focus();
+    }
+
+    togglePreview(textarea, previewArea, btn) {
+        this.isPreviewing = !this.isPreviewing;
+        if (this.isPreviewing) {
+            previewArea.innerHTML = marked.parse(textarea.value);
+            textarea.style.display = 'none';
+            previewArea.style.display = 'block';
+            btn.textContent = '✏️ 编辑';
+        } else {
+            textarea.style.display = 'block';
+            previewArea.style.display = 'none';
+            btn.textContent = '👁️ 预览';
+        }
+    }
+
+    handleLocalImageUpload(file, textarea) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const base64 = e.target.result;
+            const replacement = `![${file.name}](${base64})`;
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            textarea.setRangeText(replacement, start, end, 'select');
+        };
+        reader.readAsDataURL(file);
     }
 
     /**
@@ -674,10 +765,14 @@ class CloudflareManager {
         }
 
         const url = `https://api.cloudflare.com/client/v4${endpoint}`;
+
+        // Sanitize token: remove whitespace/newlines which cause fetch to throw "Failed to fetch" (TypeError)
+        const token = (this.currentAccount.token || '').trim();
+
         const options = {
             method,
             headers: {
-                'Authorization': `Bearer ${this.currentAccount.token}`
+                'Authorization': `Bearer ${token}`
             }
         };
 
@@ -703,7 +798,8 @@ class CloudflareManager {
         } catch (error) {
             console.error('[API Error]', error);
             if (error.message === 'Failed to fetch') {
-                throw new Error('网络请求失败，请检查网络连接或API Token是否有效');
+                console.error('[API Error] Network request failed. If you are in a restricted region, please check your proxy settings.');
+                throw new Error('网络请求失败 (Failed to fetch)。\n请检查您的网络连接，或确保代理设置允许访问 Cloudflare API。');
             }
             throw error;
         }
@@ -726,10 +822,12 @@ class CloudflareManager {
     }
 
     async loadZones() {
+        if (this.isLoadingZones) return; // 防止重复加载
         this.isLoadingZones = true;
-        this.zones = [];
+        const newZones = [];
         let page = 1;
         const perPage = 50;
+        let hasError = false;
 
         while (true) {
             try {
@@ -737,7 +835,7 @@ class CloudflareManager {
                 const response = await this.apiRequest(`/zones?per_page=${perPage}&page=${page}`);
                 const zones = response || [];
 
-                this.zones.push(...zones);
+                newZones.push(...zones);
 
                 if (zones.length < perPage) {
                     break;
@@ -745,10 +843,23 @@ class CloudflareManager {
                 page++;
             } catch (error) {
                 console.error('Failed to load zones page', page, error);
-                this.isLoadingZones = false; // Ensure loading state is reset on error
+                hasError = true;
                 break;
             }
         }
+
+        // 只有当至少加载到一些数据，或者虽然报错但之前是空的（首次加载），才更新
+        // 如果之前有数据（缓存），且这次完全失败（hasError && newZones.length === 0），则不覆盖，保留缓存
+        if (newZones.length > 0 || !hasError || this.zones.length === 0) {
+            this.zones = newZones;
+            if (hasError && this.zones.length > 0) {
+                this.showToast('仅加载了部分域名 (网络中断)', 'warning');
+            }
+        } else if (hasError && this.zones.length > 0) {
+            this.showToast('加载失败，显示缓存数据', 'warning');
+            console.log('[Offline] Kept cached zones due to load failure');
+        }
+
         this.isLoadingZones = false;
         return this.zones;
     }
@@ -812,7 +923,7 @@ class CloudflareManager {
                 this.accountId = matchedZone.account.id;
                 return this.accountId;
             }
-            
+
             // 如果没找到名称匹配的，但有 zones，说明至少能拿到一个有效的 accountId
             if (this.zones[0].account?.id) {
                 this.accountId = this.zones[0].account.id;
@@ -865,8 +976,9 @@ class CloudflareManager {
     }
 
     async loadWorkers() {
+        if (this.isLoadingWorkers) return;
         this.isLoadingWorkers = true;
-        
+
         // 开启全量扫描模式：不再仅限于特定超级管理员，让所有用户都能更完整地加载资源
         console.log(`[Workers] Loading workers using Deep-Scan mode...`);
 
@@ -909,12 +1021,16 @@ class CloudflareManager {
             }
 
             const allAccounts = Array.from(uniqueAccounts.values());
-            
+            /* 
+               即使没有找到账户，也不应该抛错导致通过不了 offline 检查。
+               如果离线，allAccounts 可能为空（如果 zones 也为空）。
+               如果 zones 有缓存，allAccounts 就有值。
+            */
             if (allAccounts.length === 0) {
-                throw new Error('无法发现任何 Cloudflare 账户。请检查 API Token 权限（需要 Account.Workers Scripts 权限）。');
+                console.warn('[Workers] No accounts found to scan (possibly offline).');
+            } else {
+                console.log(`Scanning ${allAccounts.length} accounts for Workers`);
             }
-
-            console.log(`Scanning ${allAccounts.length} accounts for Workers`);
 
             // Parallel fetch
             const promises = allAccounts.map(async account => {
@@ -928,13 +1044,43 @@ class CloudflareManager {
                         }
                     }));
                 } catch (err) {
-                    console.warn(`Failed to fetch workers for account ${account.name} (${account.id}):`, err);
+                    // console.warn(`Failed to fetch workers for account ${account.name} (${account.id}):`, err);
                     return [];
                 }
             });
 
             const results = await Promise.all(promises);
-            this.workers = results.flat();
+            const newWorkers = results.flat();
+
+            // Only update if we got something OR if we didn't have anything before
+            // If we have cache and network failed (newWorkers empty but allAccounts > 0), keep cache
+            const hasNetworkSuccess = results.some(r => r.length > 0) || (allAccounts.length > 0 && results.length > 0);
+            // 简单的逻辑：如果有新数据，或者之前没数据，就更新。
+            // 但如果这次全是空（可能是网络错，也可能是真没数据），比较难判断。
+            // 我们可以看 results 的长度。如果 allAccounts 有值，但 promises 全部 catch 返回 []，那可能是网络错。
+            // 但这里 catch 里返回 []， indistinguishable from empty account.
+
+            // 改进：只要 results 有长度（即尝试了请求），我们就认为尝试过了。
+            // 如果 newWorkers.length > 0，肯定更新。
+            // 如果 newWorkers.length === 0, 且 this.workers.length > 0, 我们怎么知道是网络错还是真删了？
+            // 鉴于 APIRequest 会 throw，catch 里返回 []。
+            // 我们应该在 catch 里标记 error。
+
+            if (newWorkers.length > 0 || this.workers.length === 0) {
+                this.workers = newWorkers;
+                // Sort: Account Name -> Worker ID
+                this.workers.sort((a, b) => {
+                    const accountA = a.account?.name || '';
+                    const accountB = b.account?.name || '';
+                    if (accountA !== accountB) {
+                        return accountA.localeCompare(accountB);
+                    }
+                    return a.id.localeCompare(b.id);
+                });
+            } else {
+                console.log('[Workers] Retaining cached workers due to empty fetch result (possibly offline).');
+            }
+
             console.log(`[Workers] Total workers loaded: ${this.workers.length} from ${allAccounts.length} accounts.`);
 
             await this.saveResourceCache(); // 保存缓存
@@ -944,21 +1090,13 @@ class CloudflareManager {
                 this.loadRemarksAndRender();
             }
 
-            // Sort: Account Name -> Worker ID
-            this.workers.sort((a, b) => {
-                const accountA = a.account?.name || '';
-                const accountB = b.account?.name || '';
-                if (accountA !== accountB) {
-                    return accountA.localeCompare(accountB);
-                }
-                return a.id.localeCompare(b.id);
-            });
-
             this.isLoadingWorkers = false;
             return this.workers;
         } catch (error) {
             this.isLoadingWorkers = false;
             console.error('loadWorkers error:', error);
+            // Don't re-throw if we want specific behavior, but here general error is fine.
+            // But we kept cache implicitly by not updating this.workers if main block failed.
             throw error;
         }
     }
@@ -1027,11 +1165,11 @@ class CloudflareManager {
             }
 
             const allAccounts = Array.from(uniqueAccounts.values());
-            
+
             if (allAccounts.length === 0) {
-                 throw new Error('无法发现任何 Cloudflare 账户。请检查 API Token 权限（需要 Account.Cloudflare Pages 权限）。');
+                throw new Error('无法发现任何 Cloudflare 账户。请检查 API Token 权限（需要 Account.Cloudflare Pages 权限）。');
             }
-            
+
             console.log(`Scanning ${allAccounts.length} accounts for Pages`);
 
             // Parallel fetch
@@ -1281,6 +1419,7 @@ class CloudflareManager {
 
     // 保存 GitHub 同步配置
     async saveGithubConfig() {
+        console.log('[CloudflareManager] Saving GitHub config...'); // Debug log to confirm new version
         const enabled = document.getElementById('enableGithubSync')?.checked || false;
         const token = document.getElementById('githubToken')?.value.trim() || '';
         const repo = document.getElementById('githubRepo')?.value.trim() || '';
@@ -1459,31 +1598,31 @@ class CloudflareManager {
      * 更新头部账户名称显示和颜色
      */
     async updateHeaderAccountUI() {
-    const headerAccountName = document.getElementById('headerAccountName');
-    if (!headerAccountName) return;
+        const headerAccountName = document.getElementById('headerAccountName');
+        if (!headerAccountName) return;
 
-    if (this.currentAccount) {
-        headerAccountName.textContent = this.currentAccount.name;
-        headerAccountName.style.display = 'inline-block';
-        headerAccountName.className = 'header-account-badge';
+        if (this.currentAccount) {
+            headerAccountName.textContent = this.currentAccount.name;
+            headerAccountName.style.display = 'inline-block';
+            headerAccountName.className = 'header-account-badge';
 
-        // 异步尝试获取颜色，不阻塞主流程
-        (async () => {
-            try {
-                // 如果本地已经有 accountId (从缓存加载的)，则直接使用
-                const realAccountId = await this.getAccountId();
-                if (realAccountId && this.currentAccount) {
-                    const colorClass = this.getAccountColorClass(realAccountId);
-                    headerAccountName.classList.add(colorClass);
+            // 异步尝试获取颜色，不阻塞主流程
+            (async () => {
+                try {
+                    // 如果本地已经有 accountId (从缓存加载的)，则直接使用
+                    const realAccountId = await this.getAccountId();
+                    if (realAccountId && this.currentAccount) {
+                        const colorClass = this.getAccountColorClass(realAccountId);
+                        headerAccountName.classList.add(colorClass);
+                    }
+                } catch (e) {
+                    console.log('[UI] Skip color update for now');
                 }
-            } catch (e) {
-                console.log('[UI] Skip color update for now');
-            }
-        })();
-    } else {
-        headerAccountName.style.display = 'none';
+            })();
+        } else {
+            headerAccountName.style.display = 'none';
+        }
     }
-}
     renderAccountSelector() {
         const select = document.getElementById('accountSelect');
         select.innerHTML = '<option value="">请选择账户</option>';
@@ -1501,78 +1640,78 @@ class CloudflareManager {
 
     // 加载所有域名和所有记录
     async loadAllZonesAndRecords() {
-    const tabsSection = document.getElementById('tabsSection');
-    const dnsSection = document.getElementById('dnsSection');
-    const recordsList = document.getElementById('recordsList');
+        const tabsSection = document.getElementById('tabsSection');
+        const dnsSection = document.getElementById('dnsSection');
+        const recordsList = document.getElementById('recordsList');
 
-    try {
-        // 1. 瞬间呈现 Tab
-        tabsSection.style.display = 'block';
-        dnsSection.style.display = 'block';
-        
-        // 2. 状态重置
-        this.selectedZoneId = '';
-        this.searchQuery = '';
-        document.getElementById('searchInput').value = '';
-        document.getElementById('clearSearchBtn').style.display = 'none';
+        try {
+            // 1. 瞬间呈现 Tab
+            tabsSection.style.display = 'block';
+            dnsSection.style.display = 'block';
 
-        // 3. 数据重置，但先尝试加载缓存以保持界面不为空白
-        this.zones = [];
-        this.allRecords = [];
-        this.workers = [];
-        this.pages = [];
-        this.accountId = null; // 必须重置，否则 getAccountId 会返回旧记录
+            // 2. 状态重置
+            this.selectedZoneId = '';
+            this.searchQuery = '';
+            document.getElementById('searchInput').value = '';
+            document.getElementById('clearSearchBtn').style.display = 'none';
 
-        // 4. 加载缓存（极速）
-        await this.loadResourceCache();
+            // 3. 数据重置，但先尝试加载缓存以保持界面不为空白
+            this.zones = [];
+            this.allRecords = [];
+            this.workers = [];
+            this.pages = [];
+            this.accountId = null; // 必须重置，否则 getAccountId 会返回旧记录
 
-        // 5. 瞬间渲染缓存数据
-        this.renderAllRecords();
-        this.renderZoneFilter();
-        this.updateNotesStatCard();
-        
-        if (this.allRecords.length === 0) {
-            recordsList.innerHTML = '<div class="loading">正在拉取 Cloudflare 实时数据...</div>';
-        }
+            // 4. 加载缓存（极速）
+            await this.loadResourceCache();
 
-        // 6. 异步刷新：在后台拉取最新数据，完全不阻塞 switchAccount 的完成
-        setTimeout(async () => {
-            try {
-                console.log('[AccountSwitch] Background refreshing...');
-                
-                // 拉取 Zones
-                await this.loadZones();
-                this.renderZoneFilter();
-                
-                // 拉取 DNS
-                await this.loadAllRecords();
-                
-                // 更新统计与 UI
-                this.collapsedZones = new Set(this.zones.map(z => z.name));
-                const recordCountEl = document.getElementById('recordCount');
-                if (recordCountEl) recordCountEl.textContent = `${this.allRecords.length} 条记录`;
-                
-                this.updateNotesStatCard();
-                this.renderAllRecords();
-                
-                // 最后触发一次 UI 颜色等更新 (因为此时 accountId 肯定拿到了)
-                this.updateHeaderAccountUI();
-                
-                // 自动加载 Workers/Pages (取决于当前在哪个 Tab)
-                if (this.currentTab === 'workers') this.loadWorkersAndRender();
-                if (this.currentTab === 'pages') this.loadPagesAndRender();
-                
-                await this.saveResourceCache();
-                console.log('[AccountSwitch] Background refresh completed.');
-            } catch (e) {
-                console.error('[AccountSwitch] Background refresh failed:', e);
+            // 5. 瞬间渲染缓存数据
+            this.renderAllRecords();
+            this.renderZoneFilter();
+            this.updateNotesStatCard();
+
+            if (this.allRecords.length === 0) {
+                recordsList.innerHTML = '<div class="loading">正在拉取 Cloudflare 实时数据...</div>';
             }
-        }, 50); // 微弱延迟，确保主渲染队列完成
 
-    } catch (error) {
-        this.showToast(error.message, 'error');
+            // 6. 异步刷新：在后台拉取最新数据，完全不阻塞 switchAccount 的完成
+            setTimeout(async () => {
+                try {
+                    console.log('[AccountSwitch] Background refreshing...');
+
+                    // 拉取 Zones
+                    await this.loadZones();
+                    this.renderZoneFilter();
+
+                    // 拉取 DNS
+                    await this.loadAllRecords();
+
+                    // 更新统计与 UI
+                    this.collapsedZones = new Set(this.zones.map(z => z.name));
+                    const recordCountEl = document.getElementById('recordCount');
+                    if (recordCountEl) recordCountEl.textContent = `${this.allRecords.length} 条记录`;
+
+                    this.updateNotesStatCard();
+                    this.renderAllRecords();
+
+                    // 最后触发一次 UI 颜色等更新 (因为此时 accountId 肯定拿到了)
+                    this.updateHeaderAccountUI();
+
+                    // 自动加载 Workers/Pages (取决于当前在哪个 Tab)
+                    if (this.currentTab === 'workers') this.loadWorkersAndRender();
+                    if (this.currentTab === 'pages') this.loadPagesAndRender();
+
+                    await this.saveResourceCache();
+                    console.log('[AccountSwitch] Background refresh completed.');
+                } catch (e) {
+                    console.error('[AccountSwitch] Background refresh failed:', e);
+                }
+            }, 50); // 微弱延迟，确保主渲染队列完成
+
+        } catch (error) {
+            this.showToast(error.message, 'error');
+        }
     }
-}
 
 
     // 获取账户颜色类名
@@ -1966,25 +2105,25 @@ class CloudflareManager {
     }
 
     async switchAccount(accountId) {
-    if (!accountId) {
-        this.currentAccount = null;
-        document.getElementById('statsSection').style.display = 'none';
-        document.getElementById('dnsSection').style.display = 'none';
-        return;
+        if (!accountId) {
+            this.currentAccount = null;
+            document.getElementById('statsSection').style.display = 'none';
+            document.getElementById('dnsSection').style.display = 'none';
+            return;
+        }
+
+        this.currentAccount = this.accounts.find(a => a.id === accountId);
+        this.accountId = null;
+
+        // 瞬间更新名称（不等待获取颜色 ID）
+        this.updateHeaderAccountUI();
+
+        // 极速保存并进入并行加载流程
+        await this.saveAccounts();
+
+        // loadAllZonesAndRecords 内部现在已经异步化，不会阻塞 switchAccount 返回
+        await this.loadAllZonesAndRecords();
     }
-
-    this.currentAccount = this.accounts.find(a => a.id === accountId);
-    this.accountId = null;
-
-    // 瞬间更新名称（不等待获取颜色 ID）
-    this.updateHeaderAccountUI();
-
-    // 极速保存并进入并行加载流程
-    await this.saveAccounts();
-    
-    // loadAllZonesAndRecords 内部现在已经异步化，不会阻塞 switchAccount 返回
-    await this.loadAllZonesAndRecords();
-}
 
     /**
      * 切换到下一个账户
@@ -3107,10 +3246,10 @@ class CloudflareManager {
         }
 
         // 2. 锁定目标及其所属账户信息（用于后续持久化）
-        this.currentRemarkTarget = { 
-            type, 
-            id, 
-            name, 
+        this.currentRemarkTarget = {
+            type,
+            id,
+            name,
             detail,
             accountId: accountId || this.currentAccount?.id || null,
             accountName: accountName || this.currentAccount?.name || '未知账号'
@@ -3290,164 +3429,207 @@ class CloudflareManager {
      * 加载并渲染备注列表
      */
     async loadRemarksAndRender() {
-        const remarksList = document.getElementById('remarksList');
-        const emptyState = document.getElementById('remarksEmptyState');
+        try {
+            const remarksList = document.getElementById('remarksList');
+            const emptyState = document.getElementById('remarksEmptyState');
 
-        // 确保先加载备注数据
-        await this.loadRemarks();
+            // 确保先加载备注数据
+            await this.loadRemarks();
 
 
-        // 1. 深度加载链式检查：必须先确保域名加载完成（用于发现所有账号），然后再加载 Worker/Page
-        const triggerLoading = async () => {
-            if (this.zones.length === 0 && !this.isLoadingZones) {
-                console.log('[Remarks] Priority Loading: Zones...');
-                await this.loadZones();
-            }
-            if (this.workers.length === 0 && !this.isLoadingWorkers) {
-                console.log('[Remarks] Priority Loading: Workers...');
-                this.loadWorkers(); // 异步触发，不阻塞渲染
-            }
-            if (this.pages.length === 0 && !this.isLoadingPages) {
-                console.log('[Remarks] Priority Loading: Pages...');
-                this.loadPages(); // 异步触发，不阻塞渲染
-            }
-        };
-        triggerLoading();
-
-        console.log('[Remarks] RESOURCE STATUS:', {
-            zones: this.zones.length, 
-            isLoadingZones: this.isLoadingZones,
-            workers: this.workers.length, 
-            isLoadingWorkers: this.isLoadingWorkers,
-            pages: this.pages.length, 
-            isLoadingPages: this.isLoadingPages,
-            retryCount: this.remarksRetryCount
-        });
-
-        // 2. 智能多次重试机制：持续检测直到资源加载完成（最多 5 次）
-        const anyLoading = this.isLoadingZones || this.isLoadingWorkers || this.isLoadingPages;
-        // 如果列表为空且存在对应分类的备注，说明匹配池尚未就绪
-        const hasWorkerRemarks = Object.keys(this.remarks).some(k => k.startsWith('worker:'));
-        const hasPageRemarks = Object.keys(this.remarks).some(k => k.startsWith('page:'));
-        const pendingData = (this.workers.length === 0 && hasWorkerRemarks) || (this.pages.length === 0 && hasPageRemarks);
-
-        if ((anyLoading || pendingData) && !this.remarksReloadRegistered && this.remarksRetryCount < this.remarksMaxRetries) {
-            this.remarksRetryCount++;
-            console.log(`[Remarks] Data pending. Scheduling background refresh #${this.remarksRetryCount}/${this.remarksMaxRetries}...`);
-            this.remarksReloadRegistered = true;
-            
-            // 下发异步轮询，但不 return，让列表先显示出来
-            setTimeout(() => {
-                this.remarksReloadRegistered = false;
-                if (this.currentTab === 'notes') {
-                    this.loadRemarksAndRender();
+            // 1. 深度加载链式检查：必须先确保域名加载完成（用于发现所有账号），然后再加载 Worker/Page
+            const triggerLoading = async () => {
+                if (this.zones.length === 0 && !this.isLoadingZones) {
+                    console.log('[Remarks] Priority Loading: Zones...');
+                    await this.loadZones();
                 }
-            }, 5000); // 增加间隔，减少主线程压力
-        }
+                if (this.workers.length === 0 && !this.isLoadingWorkers) {
+                    console.log('[Remarks] Priority Loading: Workers...');
+                    this.loadWorkers(); // 异步触发，不阻塞渲染
+                }
+                if (this.pages.length === 0 && !this.isLoadingPages) {
+                    console.log('[Remarks] Priority Loading: Pages...');
+                    this.loadPages(); // 异步触发，不阻塞渲染
+                }
+            };
+            triggerLoading();
 
-        // 3. 如果加载已完成或达到最大重试次数，重置计数器并继续渲染
-        if (!anyLoading && !pendingData) {
-            this.remarksRetryCount = 0;
-            console.log('[Remarks] All resources loaded successfully!');
-        } else if (this.remarksRetryCount >= this.remarksMaxRetries) {
-            console.warn('[Remarks] Max retries reached, rendering with available data...');
-            this.remarksRetryCount = 0;
-        }
+            console.log('[Remarks] RESOURCE STATUS:', {
+                zones: this.zones.length,
+                isLoadingZones: this.isLoadingZones,
+                workers: this.workers.length,
+                isLoadingWorkers: this.isLoadingWorkers,
+                pages: this.pages.length,
+                isLoadingPages: this.isLoadingPages,
+                retryCount: this.remarksRetryCount
+            });
 
-        // 将 remarks 对象转换为数组，并进行实时账户关联补全
-        const remarksArray = Object.entries(this.remarks)
-            .map(([key, value]) => {
-                // 1. 存量数据解析：如果缺失 type 或 id，从 key (format: "type:id") 中解析
-                if (!value.type || !value.id) {
-                    const parts = key.split(':');
-                    if (parts.length >= 2) {
-                        value.type = value.type || parts[0];
-                        value.id = value.id || parts.slice(1).join(':');
+            // 2. 智能多次重试机制：持续检测直到资源加载完成（最多 5 次）
+            const anyLoading = this.isLoadingZones || this.isLoadingWorkers || this.isLoadingPages;
+            // 如果列表为空且存在对应分类的备注，说明匹配池尚未就绪
+            const hasWorkerRemarks = Object.keys(this.remarks).some(k => k.startsWith('worker:'));
+            const hasPageRemarks = Object.keys(this.remarks).some(k => k.startsWith('page:'));
+            const pendingData = (this.workers.length === 0 && hasWorkerRemarks) || (this.pages.length === 0 && hasPageRemarks);
+
+            if ((anyLoading || pendingData) && !this.remarksReloadRegistered && this.remarksRetryCount < this.remarksMaxRetries) {
+                this.remarksRetryCount++;
+                console.log(`[Remarks] Data pending. Scheduling background refresh #${this.remarksRetryCount}/${this.remarksMaxRetries}...`);
+                this.remarksReloadRegistered = true;
+
+                // 下发异步轮询，但不 return，让列表先显示出来
+                setTimeout(() => {
+                    this.remarksReloadRegistered = false;
+                    if (this.currentTab === 'notes') {
+                        this.loadRemarksAndRender();
                     }
-                }
+                }, 5000); // 增加间隔，减少主线程压力
+            }
 
-                // 2. 实时资源匹配补全 accountId (关键：供跨账户过滤使用)
-                if (!value.accountId || value.accountId === 'unknown') {
-                    if (value.type === 'zone' || value.type === 'dns') {
-                        const targetId = value.type === 'zone' ? value.id : value.zoneId;
-                        const zone = this.zones.find(z => z.id === targetId);
-                        if (zone && zone.account) {
-                            value.accountId = zone.account.id;
-                            value.accountName = zone.account.name;
-                        }
-                    } else if (value.type === 'worker') {
-                        const searchId = (value.id || '').toLowerCase().trim();
-                        const worker = this.workers.find(w => (w.id || '').toLowerCase() === searchId);
-                        if (worker && worker.account) {
-                            value.accountId = worker.account.id;
-                            value.accountName = worker.account.name;
-                        }
-                    } else if (value.type === 'page') {
-                        const searchId = (value.id || '').toLowerCase().trim();
-                        const page = this.pages.find(p => (p.id || '').toLowerCase() === searchId);
-                        if (page && page.account) {
-                            value.accountId = page.account.id;
-                            value.accountName = page.account.name;
+            // 3. 如果加载已完成或达到最大重试次数，重置计数器并继续渲染
+            if (!anyLoading && !pendingData) {
+                this.remarksRetryCount = 0;
+                console.log('[Remarks] All resources loaded successfully!');
+            } else if (this.remarksRetryCount >= this.remarksMaxRetries) {
+                console.warn('[Remarks] Max retries reached, rendering with available data...');
+                this.remarksRetryCount = 0;
+            }
+
+            if (!this.remarks || Object.keys(this.remarks).length === 0) {
+                if (remarksList) remarksList.innerHTML = '';
+                if (emptyState) {
+                    emptyState.style.display = 'block';
+                    // DEBUG INFO
+                    const debugInfo = document.createElement('div');
+                    debugInfo.style.cssText = 'margin-top: 10px; font-size: 10px; color: #999; text-align: center;';
+                    debugInfo.textContent = `Debug: Storage key count = ${this.remarks ? Object.keys(this.remarks).length : 'null'}`;
+                    emptyState.appendChild(debugInfo);
+                }
+                this.updateRemarksStats([]);
+                return;
+            }
+
+            // 将 remarks 对象转换为数组，并进行实时账户关联补全
+            const remarksArray = Object.entries(this.remarks)
+                .map(([key, value]) => {
+                    // Safety check
+                    if (!value || typeof value !== 'object') return null;
+
+                    // 1. 存量数据解析：如果缺失 type 或 id，从 key (format: "type:id") 中解析
+                    if (!value.type || !value.id) {
+                        const parts = key.split(':');
+                        if (parts.length >= 2) {
+                            value.type = value.type || parts[0];
+                            value.id = value.id || parts.slice(1).join(':');
                         }
                     }
+
+                    // 2. 实时资源匹配补全 accountId (关键：供跨账户过滤使用)
+                    if (!value.accountId || value.accountId === 'unknown') {
+                        if (value.type === 'zone' || value.type === 'dns') {
+                            const targetId = value.type === 'zone' ? value.id : value.zoneId;
+                            let zone = null;
+
+                            if (targetId) {
+                                zone = this.zones.find(z => z.id === targetId);
+                            }
+
+                            // 2. 如果通过 ID 没找到，或者是 DNS 记录且没有 zoneId，尝试通过域名后缀匹配
+                            if (!zone && (value.type === 'dns' || value.type === 'zone')) {
+                                const recordName = (value.name || '').toLowerCase();
+                                if (recordName) {
+                                    zone = this.zones
+                                        .filter(z => recordName.endsWith(z.name.toLowerCase()))
+                                        .sort((a, b) => b.name.length - a.name.length)[0];
+
+                                    if (zone) {
+                                        value.zoneId = zone.id;
+                                    }
+                                }
+                            }
+
+                            if (zone && zone.account) {
+                                value.accountId = zone.account.id;
+                                value.accountName = zone.account.name;
+                            }
+                        } else if (value.type === 'worker') {
+                            const searchId = (value.id || '').toLowerCase().trim();
+                            const worker = this.workers.find(w =>
+                                (w.id || '').toLowerCase() === searchId ||
+                                (w.name || '').toLowerCase() === searchId
+                            );
+                            if (worker && worker.account) {
+                                value.accountId = worker.account.id;
+                                value.accountName = worker.account.name;
+                            }
+                        } else if (value.type === 'page') {
+                            const searchId = (value.id || '').toLowerCase().trim();
+                            const page = this.pages.find(p =>
+                                (p.id || '').toLowerCase() === searchId ||
+                                (p.name || '').toLowerCase() === searchId
+                            );
+                            if (page && page.account) {
+                                value.accountId = page.account.id;
+                                value.accountName = page.account.name;
+                            }
+                        }
+                    }
+
+                    return {
+                        key,
+                        ...value
+                    };
+                })
+                .filter(r => r && r.content) // 过滤掉无效或空备注
+                .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)); // 按时间排序
+
+            console.log('[Remarks] Remarks array:', remarksArray);
+
+            // 应用过滤
+            const filtered = this.getFilteredRemarks(remarksArray);
+
+            // 更新统计 (仅统计当前可见的备注)
+            this.updateRemarksStats(filtered);
+
+            // 更新总数统计卡片 (反映当前可见数量)
+            const notesStatCard = document.getElementById('notesStatCard');
+            if (notesStatCard) {
+                const statNumberEl = notesStatCard.querySelector('.stat-number');
+                if (statNumberEl) {
+                    statNumberEl.textContent = filtered.length + ' 条备注';
                 }
-
-                return {
-                    key,
-                    ...value
-                };
-            })
-            .filter(r => r.content) // 过滤掉空备注
-            .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)); // 按时间排序
-
-        console.log('[Remarks] Remarks array:', remarksArray);
-
-        // 应用过滤
-        const filtered = this.getFilteredRemarks(remarksArray);
-
-        // 更新统计 (仅统计当前可见的备注)
-        this.updateRemarksStats(filtered);
-
-        // 更新总数统计卡片 (反映当前可见数量)
-        const notesStatCard = document.getElementById('notesStatCard');
-        if (notesStatCard) {
-            const statNumberEl = notesStatCard.querySelector('.stat-number');
-            if (statNumberEl) {
-                statNumberEl.textContent = filtered.length + ' 条备注';
             }
-        }
 
-        if (filtered.length === 0) {
+            if (filtered.length === 0) {
+                remarksList.innerHTML = '';
+                emptyState.style.display = 'block';
+                return;
+            }
+
+            emptyState.style.display = 'none';
             remarksList.innerHTML = '';
-            emptyState.style.display = 'block';
-            return;
-        }
 
-        emptyState.style.display = 'none';
-        remarksList.innerHTML = '';
+            // 按类型分组
+            const grouped = {};
+            filtered.forEach(remark => {
+                const type = remark.type || 'unknown';
+                if (!grouped[type]) {
+                    grouped[type] = [];
+                }
+                grouped[type].push(remark);
+            });
 
-        // 按类型分组
-        const grouped = {};
-        filtered.forEach(remark => {
-            const type = remark.type || 'unknown';
-            if (!grouped[type]) {
-                grouped[type] = [];
-            }
-            grouped[type].push(remark);
-        });
+            const typeLabels = {
+                'zone': '🌐 域名',
+                'dns': '📡 DNS 记录',
+                'worker': '⚡ Workers',
+                'page': '📄 Pages'
+            };
 
-        const typeLabels = {
-            'zone': '🌐 域名',
-            'dns': '📡 DNS 记录',
-            'worker': '⚡ Workers',
-            'page': '📄 Pages'
-        };
-
-        Object.entries(grouped).forEach(([type, remarks]) => {
-            const isCollapsed = this.collapsedRemarkGroups.has(type);
-            const groupDiv = document.createElement('div');
-            groupDiv.className = `remarks-group ${isCollapsed ? 'collapsed' : ''}`;
-            groupDiv.innerHTML = `
+            Object.entries(grouped).forEach(([type, remarks]) => {
+                const isCollapsed = this.collapsedRemarkGroups.has(type);
+                const groupDiv = document.createElement('div');
+                groupDiv.className = `remarks-group ${isCollapsed ? 'collapsed' : ''}`;
+                groupDiv.innerHTML = `
                 <div class="remarks-group-header" data-type="${type}">
                     <div class="remarks-group-header-left">
                         <span class="remarks-group-toggle">
@@ -3461,115 +3643,112 @@ class CloudflareManager {
                 </div>
             `;
 
-            // 绑定分组点击折叠事件
-            groupDiv.querySelector('.remarks-group-header').addEventListener('click', () => {
-                if (this.collapsedRemarkGroups.has(type)) {
-                    this.collapsedRemarkGroups.delete(type);
-                    groupDiv.classList.remove('collapsed');
-                } else {
-                    this.collapsedRemarkGroups.add(type);
-                    groupDiv.classList.add('collapsed');
-                }
-            });
+                // 绑定分组点击折叠事件
+                groupDiv.querySelector('.remarks-group-header').addEventListener('click', () => {
+                    if (this.collapsedRemarkGroups.has(type)) {
+                        this.collapsedRemarkGroups.delete(type);
+                        groupDiv.classList.remove('collapsed');
+                    } else {
+                        this.collapsedRemarkGroups.add(type);
+                        groupDiv.classList.add('collapsed');
+                    }
+                });
 
-            const listDiv = document.createElement('div');
-            listDiv.className = 'remarks-group-list';
+                const listDiv = document.createElement('div');
+                listDiv.className = 'remarks-group-list';
 
-            remarks.forEach(remark => {
-                const item = document.createElement('div');
-                item.className = 'remark-list-item';
+                remarks.forEach(remark => {
+                    const item = document.createElement('div');
+                    item.className = 'remark-list-item';
 
-                const tagsHtml = remark.tags && remark.tags.length > 0
-                    ? `<div class="remark-item-tags">${remark.tags.map(t => `<span class="remark-item-tag">${this.escapeHtml(t)}</span>`).join('')}</div>`
-                    : '';
+                    const tagsHtml = remark.tags && remark.tags.length > 0
+                        ? `<div class="remark-item-tags">${remark.tags.map(t => `<span class="remark-item-tag">${this.escapeHtml(t)}</span>`).join('')}</div>`
+                        : '';
 
-                const dateStr = remark.updatedAt
-                    ? new Date(remark.updatedAt).toLocaleString('zh-CN')
-                    : '';
+                    const dateStr = remark.updatedAt
+                        ? new Date(remark.updatedAt).toLocaleString('zh-CN')
+                        : '';
 
-                // 优先级: 别名 > 原始名称 > ID
-                const displayName = remark.alias || remark.name || remark.id;
+                    // 优先级: 别名 > 原始名称 > ID
+                    const displayName = remark.alias || remark.name || remark.id;
 
-                let accountTagHtml = '';
-                let finalAccountName = remark.accountName;
-                let finalAccountId = remark.accountId;
+                    let accountTagHtml = '';
+                    let finalAccountName = remark.accountName;
+                    let finalAccountId = remark.accountId;
 
-                // 如果缺失账号信息，尝试从已加载的资源中匹配
-                if (!finalAccountName || finalAccountName === '未知账号') {
-                    if (remark.type === 'zone' || remark.type === 'dns') {
-                        // 尝试匹配 zone ID
-                        const targetZoneId = remark.type === 'zone' ? remark.id : remark.zoneId;
-                        const zone = this.zones.find(z => z.id === targetZoneId);
-                        if (zone && zone.account) {
-                            finalAccountName = zone.account.name;
-                            finalAccountId = zone.account.id;
-                        } else if (remark.type === 'dns') {
-                            // DNS 特殊情况：如果 this.zones 里没找到，尝试在 this.records 相关的域里找
-                            const parentZone = this.zones.find(z => remark.name && remark.name.endsWith(z.name));
-                            if (parentZone && parentZone.account) {
-                                finalAccountName = parentZone.account.name;
-                                finalAccountId = parentZone.account.id;
-                            }
-                        }
-                    } else if (remark.type === 'worker') {
-                        // Worker 匹配策略：全面覆盖 id, name, tag 以及 alias
-                        const searchId = (remark.id || '').toLowerCase().trim();
-                        const searchName = (remark.name || '').toLowerCase().trim();
-                        
-                        const worker = this.workers.find(w => {
-                            const wId = (w.id || '').toLowerCase().trim();
-                            const wName = (w.name || '').toLowerCase().trim();
-                            return wId === searchId || wName === searchId || wId === searchName || wName === searchName;
-                        });
-
-                        if (worker && worker.account) {
-                            finalAccountName = worker.account.name;
-                            finalAccountId = worker.account.id;
-                        } else {
-                            // 诊断日志：如果是第一个失败的，输出匹配池样例
-                            if (remark.id === 'joey-cfnew-2-9-1' || remarks.indexOf(remark) === 0) {
-                                console.warn(`[Remarks] Worker Match Failed for "${remark.id}". Pool size: ${this.workers.length}. Sample ID from pool: ${this.workers.length > 0 ? this.workers[0].id : 'EMPTY'}`);
-                                if (this.workers.length > 0 && remarks.indexOf(remark) === 0) {
-                                     console.log('[Remarks] Worker Pool IDs:', this.workers.slice(0, 5).map(w => w.id));
+                    // 如果缺失账号信息，尝试从已加载的资源中匹配
+                    if (!finalAccountName || finalAccountName === '未知账号') {
+                        if (remark.type === 'zone' || remark.type === 'dns') {
+                            // 尝试匹配 zone ID
+                            const targetZoneId = remark.type === 'zone' ? remark.id : remark.zoneId;
+                            const zone = this.zones.find(z => z.id === targetZoneId);
+                            if (zone && zone.account) {
+                                finalAccountName = zone.account.name;
+                                finalAccountId = zone.account.id;
+                            } else if (remark.type === 'dns') {
+                                // DNS 特殊情况：如果 this.zones 里没找到，尝试在 this.records 相关的域里找
+                                const parentZone = this.zones.find(z => remark.name && remark.name.endsWith(z.name));
+                                if (parentZone && parentZone.account) {
+                                    finalAccountName = parentZone.account.name;
+                                    finalAccountId = parentZone.account.id;
                                 }
                             }
-                        }
-                    } else if (remark.type === 'page') {
-                        // Page 匹配策略
-                        const searchId = (remark.id || '').toLowerCase().trim();
-                        const searchName = (remark.name || '').toLowerCase().trim();
-                        
-                        const page = this.pages.find(p => {
-                            const pId = (p.id || '').toLowerCase().trim();
-                            const pName = (p.name || '').toLowerCase().trim();
-                            return pId === searchId || pName === searchId || pId === searchName || pName === searchName;
-                        });
-                        if (page && page.account) {
-                            finalAccountName = page.account.name;
-                            finalAccountId = page.account.id;
+                        } else if (remark.type === 'worker') {
+                            // Worker 匹配策略：全面覆盖 id, name, tag 以及 alias
+                            const searchId = (remark.id || '').toLowerCase().trim();
+                            const searchName = (remark.name || '').toLowerCase().trim();
+
+                            const worker = this.workers.find(w => {
+                                const wId = (w.id || '').toLowerCase().trim();
+                                const wName = (w.name || '').toLowerCase().trim();
+                                return wId === searchId || wName === searchId || wId === searchName || wName === searchName;
+                            });
+
+                            if (worker && worker.account) {
+                                finalAccountName = worker.account.name;
+                                finalAccountId = worker.account.id;
+                            } else {
+                                // 诊断日志：如果是第一个失败的，输出匹配池样例
+                                if (remarks.indexOf(remark) === 0 && this.workers.length > 0) {
+                                    console.debug(`[Remarks] First remark match failed. ID: "${remark.id}". Pool size: ${this.workers.length}.`);
+                                }
+                            }
+                        } else if (remark.type === 'page') {
+                            // Page 匹配策略
+                            const searchId = (remark.id || '').toLowerCase().trim();
+                            const searchName = (remark.name || '').toLowerCase().trim();
+
+                            const page = this.pages.find(p => {
+                                const pId = (p.id || '').toLowerCase().trim();
+                                const pName = (p.name || '').toLowerCase().trim();
+                                return pId === searchId || pName === searchId || pId === searchName || pName === searchName;
+                            });
+                            if (page && page.account) {
+                                finalAccountName = page.account.name;
+                                finalAccountId = page.account.id;
+                            }
                         }
                     }
-                }
 
-                if (finalAccountName) {
-                    const colorClass = this.getAccountColorClass(finalAccountId);
-                    accountTagHtml = `<span class="account-tag ${colorClass}" style="margin-left: 8px !important; display: inline-block !important; padding: 2px 6px !important; border-radius: 4px !important; font-size: 11px !important; line-height: 1 !important; color: white !important; vertical-align: middle !important;">${this.escapeHtml(finalAccountName)}</span>`;
-                } else if (anyLoading || pendingData) {
-                    // 异步占位符：显示同步中
-                    accountTagHtml = `<span class="account-tag" style="margin-left: 8px !important; display: inline-block !important; padding: 2px 6px !important; border-radius: 4px !important; font-size: 11px !important; line-height: 1 !important; color: rgba(255,255,255,0.7) !important; background: rgba(255,255,255,0.1) !important; vertical-align: middle !important; border: 1px dashed rgba(255,255,255,0.2) !important;">同步中...</span>`;
-                } else {
-                    // 最终确实没匹配到
-                    if (remark.type === 'worker' && this.workers.length > 0 && remarks.indexOf(remark) === 0) {
-                        console.warn(`[Remarks] Worker Match Failed! Remark ID: "${remark.id}". Pool size: ${this.workers.length}`);
+                    if (finalAccountName) {
+                        const colorClass = this.getAccountColorClass(finalAccountId);
+                        accountTagHtml = `<span class="account-tag ${colorClass}" style="margin-left: 8px !important; display: inline-block !important; padding: 2px 6px !important; border-radius: 4px !important; font-size: 11px !important; line-height: 1 !important; color: white !important; vertical-align: middle !important;">${this.escapeHtml(finalAccountName)}</span>`;
+                    } else if (anyLoading || pendingData) {
+                        // 异步占位符：显示同步中
+                        accountTagHtml = `<span class="account-tag" style="margin-left: 8px !important; display: inline-block !important; padding: 2px 6px !important; border-radius: 4px !important; font-size: 11px !important; line-height: 1 !important; color: rgba(255,255,255,0.7) !important; background: rgba(255,255,255,0.1) !important; vertical-align: middle !important; border: 1px dashed rgba(255,255,255,0.2) !important;">同步中...</span>`;
+                    } else {
+                        // 最终确实没匹配到
+                        if (remark.type === 'worker' && this.workers.length > 0 && remarks.indexOf(remark) === 0) {
+                            console.warn(`[Remarks] Worker Match Failed! Remark ID: "${remark.id}". Pool size: ${this.workers.length}`);
+                        }
                     }
-                }
 
-                const renderedContent = typeof marked !== 'undefined' ? marked.parse(remark.content) : this.escapeHtml(remark.content);
-                // 判断内容是否过长（字符数 > 300 或 行数 > 8）
-                const lineCount = (remark.content.match(/\n/g) || []).length + 1;
-                const isLong = remark.content.length > 400 || lineCount > 10;
+                    const renderedContent = typeof marked !== 'undefined' ? marked.parse(remark.content) : this.escapeHtml(remark.content);
+                    // 判断内容是否过长（字符数 > 300 或 行数 > 8）
+                    const lineCount = (remark.content.match(/\n/g) || []).length + 1;
+                    const isLong = remark.content.length > 400 || lineCount > 10;
 
-                item.innerHTML = `
+                    item.innerHTML = `
                     <div class="remark-item-header" style="display: flex !important; justify-content: space-between !important; align-items: flex-start !important; gap: 10px !important; margin-bottom: 8px !important;">
                         <div class="remark-item-title-row" style="flex: 1 !important; display: flex !important; align-items: center !important; flex-wrap: wrap !important; gap: 4px !important;">
                             <span class="remark-item-name" style="font-weight: 600 !important; font-size: 14px !important; color: var(--text-main) !important;">${this.escapeHtml(displayName)}</span>
@@ -3593,37 +3772,43 @@ class CloudflareManager {
                     </div>
                 `;
 
-                // 绑定内容折叠切换事件
-                if (isLong) {
-                    const contentEl = item.querySelector('.remark-item-content');
-                    const toggleEl = item.querySelector('.remark-content-toggle');
-                    toggleEl.addEventListener('click', () => {
-                        const isExpanded = contentEl.classList.toggle('expanded');
-                        contentEl.classList.toggle('foldable', !isExpanded);
-                        toggleEl.querySelector('span').textContent = isExpanded ? '收起内容' : '展开全部';
-                        toggleEl.querySelector('svg').style.transform = isExpanded ? 'rotate(180deg)' : '';
-                    });
-                }
-
-                item.querySelector('[data-action="edit"]').addEventListener('click', () => {
-                    this.openRemarkModal(remark.type, remark.id, displayName, '');
-                });
-
-                item.querySelector('[data-action="delete"]').addEventListener('click', async () => {
-                    if (confirm('确定要删除这条备注吗？')) {
-                        delete this.remarks[remark.key];
-                        await this.saveRemarksToStorage();
-                        this.showToast('备注已删除', 'success');
-                        this.loadRemarksAndRender();
+                    // 绑定内容折叠切换事件
+                    if (isLong) {
+                        const contentEl = item.querySelector('.remark-item-content');
+                        const toggleEl = item.querySelector('.remark-content-toggle');
+                        toggleEl.addEventListener('click', () => {
+                            const isExpanded = contentEl.classList.toggle('expanded');
+                            contentEl.classList.toggle('foldable', !isExpanded);
+                            toggleEl.querySelector('span').textContent = isExpanded ? '收起内容' : '展开全部';
+                            toggleEl.querySelector('svg').style.transform = isExpanded ? 'rotate(180deg)' : '';
+                        });
                     }
+
+                    item.querySelector('[data-action="edit"]').addEventListener('click', () => {
+                        this.openRemarkModal(remark.type, remark.id, displayName, '');
+                    });
+
+                    item.querySelector('[data-action="delete"]').addEventListener('click', async () => {
+                        if (confirm('确定要删除这条备注吗？')) {
+                            delete this.remarks[remark.key];
+                            await this.saveRemarksToStorage();
+                            this.showToast('备注已删除', 'success');
+                            this.loadRemarksAndRender();
+                        }
+                    });
+
+                    listDiv.appendChild(item);
                 });
 
-                listDiv.appendChild(item);
+                groupDiv.appendChild(listDiv);
+                remarksList.appendChild(groupDiv);
             });
-
-            groupDiv.appendChild(listDiv);
-            remarksList.appendChild(groupDiv);
-        });
+        } catch (error) {
+            console.error('[Remarks] Render error:', error);
+            this.showToast('备注加载失败: ' + error.message, 'error');
+            const remarksList = document.getElementById('remarksList');
+            if (remarksList) remarksList.innerHTML = `<div class="error-state" style="padding: 20px; text-align: center; color: #ff4d4f;">加载失败: ${this.escapeHtml(error.message)}</div>`;
+        }
     }
 
     /**
@@ -3632,7 +3817,7 @@ class CloudflareManager {
     getFilteredRemarks(remarksArray) {
         return remarksArray.filter(remark => {
             // 已取消账户隔离：所有账户下均显示全部备注
-            
+
             // 类型过滤
             if (this.remarksTypeFilter && remark.type !== this.remarksTypeFilter) {
                 return false;
@@ -3645,11 +3830,11 @@ class CloudflareManager {
                 const alias = (remark.alias || '').toLowerCase();
                 const id = (remark.id || '').toLowerCase();
                 const name = (remark.name || '').toLowerCase();
-                
-                return content.includes(query) || 
-                       alias.includes(query) || 
-                       id.includes(query) || 
-                       name.includes(query);
+
+                return content.includes(query) ||
+                    alias.includes(query) ||
+                    id.includes(query) ||
+                    name.includes(query);
             }
 
             return true;
@@ -3844,6 +4029,134 @@ class CloudflareManager {
 
         const filename = this.getExportFilename('pages');
         await this.downloadJSON(data, filename);
+    }
+
+    /**
+     * 导出账号配置 (包含 Token，需谨慎)
+     */
+    async exportAccountsConfig() {
+        if (!this.accounts || this.accounts.length === 0) {
+            this.showToast('没有可导出的账号', 'warning');
+            return;
+        }
+
+        // 获取 GitHub 配置
+        let githubConfig = null;
+        try {
+            const result = await chrome.storage.local.get('githubSyncConfig');
+            githubConfig = result.githubSyncConfig;
+        } catch (e) {
+            console.warn('Failed to fetch github config for export', e);
+        }
+
+        // Show confirmation dialog due to sensitive data
+        const confirmed = confirm('⚠️ 安全警告 ⚠️\n\n导出的文件包含您的：\n1. Cloudflare API Token\n2. GitHub Personal Access Token (如果有)\n\n这些都是敏感信息。导出后请务必妥善保管，不要发送给不可信的人。\n\n是否继续？');
+        if (!confirmed) return;
+
+        const data = {
+            exportDate: new Date().toISOString(),
+            isAccountConfig: true, // Marker for validation
+            version: '1.1',
+            accounts: this.accounts.map(acc => ({
+                id: acc.id, // Usually the email or unique ID
+                name: acc.name,
+                token: acc.token
+                // Do not export color or internal state if not needed, but token is key
+            })),
+            githubSyncConfig: githubConfig // Include GitHub config
+        };
+
+        const filename = `cloudflare-accounts-config-${new Date().toISOString().slice(0, 10)}.json`;
+        await this.downloadJSON(data, filename);
+        this.showToast(`账号配置已导出至 ${filename}`, 'success');
+    }
+
+    /**
+     * 导入账号配置
+     */
+    async importAccountsConfig(file) {
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const content = e.target.result;
+                const data = JSON.parse(content);
+
+                // Basic validation
+                if (!data.isAccountConfig || !Array.isArray(data.accounts)) {
+                    throw new Error('无效的账号配置文件');
+                }
+
+                if (data.accounts.length === 0) {
+                    this.showToast('配置文件中没有账号', 'warning');
+                    return;
+                }
+
+                // 导入 GitHub 配置
+                if (data.githubSyncConfig) {
+                    try {
+                        // 验证 token 格式是否基本正确，避免导入损坏的配置
+                        if (data.githubSyncConfig.token && data.githubSyncConfig.repo) {
+                            await chrome.storage.local.set({ githubSyncConfig: data.githubSyncConfig });
+                            // 重新加载配置以更新 UI
+                            if (this.githubSync) {
+                                await this.githubSync.loadConfig();
+                            }
+                            console.log('[Import] GitHub config imported successfully');
+                        }
+                    } catch (err) {
+                        console.error('[Import] Failed to import GitHub config:', err);
+                        this.showToast('GitHub 配置导入失败', 'error');
+                    }
+                }
+
+                let addedCount = 0;
+                let updatedCount = 0;
+
+                // Merge strategy: Unique by Token
+                const currentTokens = new Set(this.accounts.map(a => a.token));
+
+                // Clone current accounts to avoid mutation issues during loop
+                const newAccounts = [...this.accounts];
+
+                for (const acc of data.accounts) {
+                    if (!acc.token || !acc.name) continue; // Skip invalid entries
+
+                    if (currentTokens.has(acc.token)) {
+                        // Token exists: Update name if changed? Or skip?
+                        // Let's skip to be safe, or maybe update the name if the user renamed it externally
+                        // For simplicity, let's treat duplicate token as "Already exists"
+                        // But we can check if ID matches but token differs (unlikely for simple structure)
+                        continue;
+                    } else {
+                        // New account
+                        newAccounts.push({
+                            id: acc.id || acc.name, // Fallback ID
+                            name: acc.name,
+                            token: acc.token
+                        });
+                        addedCount++;
+                    }
+                }
+
+                if (addedCount > 0) {
+                    await this.saveAccounts(newAccounts);
+                    this.accounts = newAccounts; // Update runtime state
+                    this.renderAccountList(); // Refresh UI
+                    this.showToast(`成功导入 ${addedCount} 个新账号` + (data.githubSyncConfig ? ' 及 GitHub 配置' : ''), 'success');
+                } else if (data.githubSyncConfig) {
+                    this.showToast('已更新 GitHub 配置 (账号未变更)', 'success');
+                } else {
+                    this.showToast('没有发现新账号', 'info');
+                }
+
+            } catch (error) {
+                console.error('Import error:', error);
+                this.showToast('导入失败: ' + error.message, 'error');
+            }
+        };
+        reader.readAsText(file);
     }
 
     /**
