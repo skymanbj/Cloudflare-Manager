@@ -124,13 +124,32 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 /**
  * 后台执行同步
  */
+/**
+ * 后台执行同步
+ */
 async function performBackgroundSync() {
   try {
     const { githubSyncConfig } = await chrome.storage.local.get('githubSyncConfig');
+    
+    // 基本配置检查
     if (!githubSyncConfig?.enabled || !githubSyncConfig?.timerSync) {
       console.log('[Sync] Sync disabled, skipping');
       return;
     }
+
+    // 网络状态检查
+    if (!navigator.onLine) {
+      console.warn('[Sync] Offline: Network connection unavailable, skipping sync');
+      return;
+    }
+
+    // 必填项检查
+    if (!githubSyncConfig.repo || !githubSyncConfig.token) {
+      console.error('[Sync] Invalid configuration: repo or token missing');
+      return;
+    }
+
+    console.log('[Sync] Background sync started...');
 
     const { cfRemarks } = await chrome.storage.local.get('cfRemarks');
     const remarks = cfRemarks || {};
@@ -159,12 +178,19 @@ async function performBackgroundSync() {
     githubSyncConfig.lastSyncTime = new Date().toISOString();
     await chrome.storage.local.set({ githubSyncConfig });
 
-    console.log('[Sync] Background sync completed');
+    console.log('[Sync] Background sync successfully completed at', githubSyncConfig.lastSyncTime);
   } catch (error) {
-    console.error('[Sync] Background sync failed:', error);
+    if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
+      console.error('[Sync] Network error: Failed to fetch. GitHub might be unreachable or connection was reset.');
+    } else {
+      console.error('[Sync] Background sync failed with error:', error.message, error);
+    }
   }
 }
 
+/**
+ * 获取远程数据
+ */
 /**
  * 获取远程数据
  */
@@ -173,26 +199,47 @@ async function getRemoteData(config) {
   const branch = config.branch || 'main';
   const url = `https://api.github.com/repos/${owner}/${repo}/contents/${SYNC_FILE_PATH}?ref=${branch}`;
 
-  const response = await fetch(url, {
-    headers: {
-      'Authorization': `Bearer ${config.token}`,
-      'Accept': 'application/vnd.github.v3+json'
+  console.log(`[Sync] Fetching remote data from: ${owner}/${repo}`);
+  
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${config.token}`,
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+
+    if (response.status === 404) {
+      console.log('[Sync] Remote sync file not found, will create on next push');
+      return { remarks: {}, deletedKeys: [], sha: null };
     }
-  });
 
-  if (response.status === 404) {
-    return { remarks: {}, deletedKeys: [], sha: null };
+    if (!response.ok) {
+      const errorMsg = `GitHub API returned ${response.status}: ${response.statusText}`;
+      throw new Error(errorMsg);
+    }
+
+    const data = await response.json();
+    
+    // 使用 TextDecoder 安全解码 Base64/UTF-8
+    const binaryString = atob(data.content.replace(/\s/g, ''));
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const contentText = new TextDecoder().decode(bytes);
+    const content = JSON.parse(contentText);
+    
+    return { ...content, sha: data.sha };
+  } catch (error) {
+    console.error('[Sync] Error in getRemoteData:', error.message);
+    throw error;
   }
-
-  if (!response.ok) {
-    throw new Error(`GitHub API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  const content = JSON.parse(atob(data.content));
-  return { ...content, sha: data.sha };
 }
 
+/**
+ * 推送数据到 GitHub
+ */
 /**
  * 推送数据到 GitHub
  */
@@ -201,9 +248,20 @@ async function pushData(config, data, sha) {
   const branch = config.branch || 'main';
   const url = `https://api.github.com/repos/${owner}/${repo}/contents/${SYNC_FILE_PATH}`;
 
+  console.log(`[Sync] Pushing data to: ${owner}/${repo}`);
+
+  // 使用 TextEncoder 安全编码 UTF-8
+  const jsonStr = JSON.stringify(data, null, 2);
+  const bytes = new TextEncoder().encode(jsonStr);
+  let binaryString = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binaryString += String.fromCharCode(bytes[i]);
+  }
+  const base64Content = btoa(binaryString);
+
   const body = {
     message: `Auto sync - ${new Date().toISOString()}`,
-    content: btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2)))),
+    content: base64Content,
     branch: branch
   };
 
@@ -211,18 +269,24 @@ async function pushData(config, data, sha) {
     body.sha = sha;
   }
 
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${config.token}`,
-      'Accept': 'application/vnd.github.v3+json',
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  });
+  try {
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${config.token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
 
-  if (!response.ok) {
-    throw new Error(`Push failed: ${response.status}`);
+    if (!response.ok) {
+      const errorMsg = `Push failed with status ${response.status}: ${response.statusText}`;
+      throw new Error(errorMsg);
+    }
+  } catch (error) {
+    console.error('[Sync] Error in pushData:', error.message);
+    throw error;
   }
 }
 

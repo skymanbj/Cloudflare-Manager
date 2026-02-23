@@ -851,7 +851,14 @@ class CloudflareManager {
         // 只有当至少加载到一些数据，或者虽然报错但之前是空的（首次加载），才更新
         // 如果之前有数据（缓存），且这次完全失败（hasError && newZones.length === 0），则不覆盖，保留缓存
         if (newZones.length > 0 || !hasError || this.zones.length === 0) {
-            this.zones = newZones;
+            // 在保存前，尝试强制补全/修正账户名称（统一显示逻辑）
+            this.zones = newZones.map(z => {
+                if (z.account && z.account.id) {
+                    z.account.name = this.getAccountDisplayName(z.account.id, z.account.name);
+                }
+                return z;
+            });
+
             if (hasError && this.zones.length > 0) {
                 this.showToast('仅加载了部分域名 (网络中断)', 'warning');
             }
@@ -876,7 +883,7 @@ class CloudflareManager {
                     ...record,
                     zoneName: zone.name,
                     zoneId: zone.id,
-                    accountName: zone.account?.name || 'Unknown',
+                    accountName: this.getAccountDisplayName(zone.account?.id, zone.account?.name),
                     accountId: zone.account?.id || 'unknown'
                 }));
                 this.allRecords.push(...recordsWithZone);
@@ -909,6 +916,27 @@ class CloudflareManager {
     }
 
     // Workers API Methods
+    /**
+     * 获取账户显示名称（优先寻找本地定义的别名）
+     * @param {string} accountId Cloudflare Account ID
+     * @param {string} fallbackName 备用名称（通常是 API 返回的原始名称）
+     * @returns {string} 最终显示的账户名
+     */
+    getAccountDisplayName(accountId, fallbackName) {
+        if (!accountId) return fallbackName || 'Unknown';
+
+        // 如果这个 accountId 匹配当前选中的账户解析出的 ID
+        // 注意：this.accountId 是在 getAccountId() 中异步确定的
+        if (this.accountId && accountId === this.accountId && this.currentAccount) {
+            return this.currentAccount.name;
+        }
+
+        // 也可以遍历所有本地账户尝试匹配（如果以后我们在本地存储了 accountId 的话）
+        // 目前仅匹配当前选中账户，因为我们没有全局的 accountId -> localName 映射
+
+        return fallbackName || 'Unknown';
+    }
+
     async getAccountId() {
         if (this.accountId) return this.accountId;
 
@@ -999,7 +1027,13 @@ class CloudflareManager {
                 const apiAccounts = await this.apiRequest('/accounts?per_page=50');
                 if (Array.isArray(apiAccounts)) {
                     apiAccounts.forEach(acc => {
-                        uniqueAccounts.set(acc.id, { id: acc.id, name: acc.name });
+                        // 如果 Map 中已经有了（通常是步骤 1 中的当前账户），且名字被优化过，则不要覆盖
+                        if (!uniqueAccounts.has(acc.id)) {
+                            uniqueAccounts.set(acc.id, { 
+                                id: acc.id, 
+                                name: this.getAccountDisplayName(acc.id, acc.name) 
+                            });
+                        }
                     });
                 }
             } catch (e) {
@@ -1143,7 +1177,12 @@ class CloudflareManager {
                 const apiAccounts = await this.apiRequest('/accounts?per_page=50');
                 if (Array.isArray(apiAccounts)) {
                     apiAccounts.forEach(acc => {
-                        uniqueAccounts.set(acc.id, { id: acc.id, name: acc.name });
+                        if (!uniqueAccounts.has(acc.id)) {
+                            uniqueAccounts.set(acc.id, { 
+                                id: acc.id, 
+                                name: this.getAccountDisplayName(acc.id, acc.name) 
+                            });
+                        }
                     });
                 }
             } catch (e) {
@@ -3466,10 +3505,18 @@ class CloudflareManager {
 
             // 2. 智能多次重试机制：持续检测直到资源加载完成（最多 5 次）
             const anyLoading = this.isLoadingZones || this.isLoadingWorkers || this.isLoadingPages;
-            // 如果列表为空且存在对应分类的备注，说明匹配池尚未就绪
+            
+            // 优化：检查是否真的有尚未匹配到账号的备注（且对应的资源库已非空）
+            const hasUnmatchedRemarks = Object.values(this.remarks).some(r => 
+                r && (r.type === 'worker' || r.type === 'page') && (!r.accountId || r.accountId === 'unknown' || r.accountId === 'null')
+            );
+            
+            // 如果列表为空且存在对应分类的备注，或者存在未匹配项且资源库非空
             const hasWorkerRemarks = Object.keys(this.remarks).some(k => k.startsWith('worker:'));
             const hasPageRemarks = Object.keys(this.remarks).some(k => k.startsWith('page:'));
-            const pendingData = (this.workers.length === 0 && hasWorkerRemarks) || (this.pages.length === 0 && hasPageRemarks);
+            const pendingData = (this.workers.length === 0 && hasWorkerRemarks) || 
+                               (this.pages.length === 0 && hasPageRemarks) ||
+                               (hasUnmatchedRemarks && (this.workers.length > 0 || this.pages.length > 0));
 
             if ((anyLoading || pendingData) && !this.remarksReloadRegistered && this.remarksRetryCount < this.remarksMaxRetries) {
                 this.remarksRetryCount++;
@@ -3560,6 +3607,14 @@ class CloudflareManager {
                             if (worker && worker.account) {
                                 value.accountId = worker.account.id;
                                 value.accountName = worker.account.name;
+                            } else {
+                                // 容错匹配：尝试在 Pages 中寻找
+                                const pageFallback = this.pages.find(p => (p.name || '').toLowerCase() === searchId);
+                                if (pageFallback && pageFallback.account) {
+                                    value.accountId = pageFallback.account.id;
+                                    value.accountName = pageFallback.account.name;
+                                    console.log(`[Remarks] Cross-type match success: Worker "${searchId}" found in Pages.`);
+                                }
                             }
                         } else if (value.type === 'page') {
                             const searchId = (value.id || '').toLowerCase().trim();
@@ -3570,6 +3625,14 @@ class CloudflareManager {
                             if (page && page.account) {
                                 value.accountId = page.account.id;
                                 value.accountName = page.account.name;
+                            } else {
+                                // 容错匹配：尝试在 Workers 中寻找
+                                const workerFallback = this.workers.find(w => (w.id || '').toLowerCase() === searchId || (w.name || '').toLowerCase() === searchId);
+                                if (workerFallback && workerFallback.account) {
+                                    value.accountId = workerFallback.account.id;
+                                    value.accountName = workerFallback.account.name;
+                                    console.log(`[Remarks] Cross-type match success: Page "${searchId}" found in Workers.`);
+                                }
                             }
                         }
                     }
@@ -3704,13 +3767,20 @@ class CloudflareManager {
                                 return wId === searchId || wName === searchId || wId === searchName || wName === searchName;
                             });
 
-                            if (worker && worker.account) {
+                             if (worker && worker.account) {
                                 finalAccountName = worker.account.name;
                                 finalAccountId = worker.account.id;
                             } else {
-                                // 诊断日志：如果是第一个失败的，输出匹配池样例
-                                if (remarks.indexOf(remark) === 0 && this.workers.length > 0) {
-                                    console.debug(`[Remarks] First remark match failed. ID: "${remark.id}". Pool size: ${this.workers.length}.`);
+                                // 容错匹配：尝试在 Pages 中寻找
+                                const pageFallback = this.pages.find(p => (p.name || '').toLowerCase() === searchId || (p.id || '').toLowerCase() === searchId);
+                                if (pageFallback && pageFallback.account) {
+                                    finalAccountName = pageFallback.account.name;
+                                    finalAccountId = pageFallback.account.id;
+                                } else {
+                                    // 诊断日志：如果是第一个失败的，输出匹配池样例
+                                    if (remarks.indexOf(remark) === 0 && this.workers.length > 0) {
+                                        console.debug(`[Remarks] Worker match failed. ID: "${remark.id}". Pool: ${this.workers.length} workers, ${this.pages.length} pages.`);
+                                    }
                                 }
                             }
                         } else if (remark.type === 'page') {
@@ -3723,9 +3793,16 @@ class CloudflareManager {
                                 const pName = (p.name || '').toLowerCase().trim();
                                 return pId === searchId || pName === searchId || pId === searchName || pName === searchName;
                             });
-                            if (page && page.account) {
+                             if (page && page.account) {
                                 finalAccountName = page.account.name;
                                 finalAccountId = page.account.id;
+                            } else {
+                                // 容错匹配：尝试在 Workers 中寻找
+                                const workerFallback = this.workers.find(w => (w.id || '').toLowerCase() === searchId || (w.name || '').toLowerCase() === searchId);
+                                if (workerFallback && workerFallback.account) {
+                                    finalAccountName = workerFallback.account.name;
+                                    finalAccountId = workerFallback.account.id;
+                                }
                             }
                         }
                     }
@@ -3739,7 +3816,7 @@ class CloudflareManager {
                     } else {
                         // 最终确实没匹配到
                         if (remark.type === 'worker' && this.workers.length > 0 && remarks.indexOf(remark) === 0) {
-                            console.warn(`[Remarks] Worker Match Failed! Remark ID: "${remark.id}". Pool size: ${this.workers.length}`);
+                            console.warn(`[Remarks] Worker Match Missing! Name: "${displayName}", ID: "${remark.id}". This resource might be deleted or from an unscanned account.`);
                         }
                     }
 
