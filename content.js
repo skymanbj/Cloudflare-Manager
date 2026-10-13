@@ -8,9 +8,12 @@
 
     console.log('Antigravity: [Content Script] Automation triggered');
 
-    // 延迟清理参数
+    // 延迟清理参数（用 URLSearchParams 避免正则残留 ? 或 &&）
     setTimeout(() => {
-        const cleanUrl = window.location.origin + window.location.pathname + window.location.search.replace(/[?&]antigravity_auto_rename=1/, '');
+        const params = new URLSearchParams(window.location.search);
+        params.delete('antigravity_auto_rename');
+        const queryString = params.toString();
+        const cleanUrl = window.location.origin + window.location.pathname + (queryString ? '?' + queryString : '');
         window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
     }, 5000);
 

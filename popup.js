@@ -123,6 +123,19 @@ class GitHubSyncManager {
         }
     }
 
+    /**
+     * UTF-8 字符串转 Base64
+     * 替代已废弃的 unescape()，确保中文等多字节字符编码正确
+     */
+    utf8ToBase64(str) {
+        const bytes = new TextEncoder().encode(str);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    }
+
     // 推送数据到 GitHub
     async pushData(data, sha) {
         if (!this.config?.token || !this.config?.repo) {
@@ -142,7 +155,7 @@ class GitHubSyncManager {
 
         const body = {
             message: `Manual sync - ${new Date().toISOString()}`,
-            content: btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2)))),
+            content: this.utf8ToBase64(JSON.stringify(data, null, 2)),
             branch: branch
         };
 
@@ -2518,12 +2531,7 @@ class CloudflareManager {
         const safeAccountName = accountName.replace(/[<>:"/\\|?*]/g, '_');
         // 生成日期时间字符串：YYYYMMDD-HHMMSS
         const now = new Date();
-        const dateTime = now.getFullYear().toString() +
-            (now.getMonth() + 1).toString().padStart(2, '0') +
-            now.getDate().toString().padStart(2, '0') + '-' +
-            now.getHours().toString().padStart(2, '0') +
-            now.getMinutes().toString().padStart(2, '0') +
-            now.getSeconds().toString().padStart(2, '0');
+        const dateTime = this.formatExportDateTime(now);
         const filename = `Cloudflare Manager-${safeAccountName}-${dateTime}.json`;
         await this.downloadJSON(allData, filename);
         // 注意：使用 a 标签下载无法准确知道用户是否完成保存，所以不显示完成消息
@@ -2727,12 +2735,7 @@ class CloudflareManager {
         }, { zones: 0, dnsRecords: 0, workers: 0, pages: 0, remarks: allData.remarks.length });
 
         const now = new Date();
-        const dateTime = now.getFullYear().toString() +
-            (now.getMonth() + 1).toString().padStart(2, '0') +
-            now.getDate().toString().padStart(2, '0') + '-' +
-            now.getHours().toString().padStart(2, '0') +
-            now.getMinutes().toString().padStart(2, '0') +
-            now.getSeconds().toString().padStart(2, '0');
+        const dateTime = this.formatExportDateTime(now);
         const filename = `Cloudflare Manager-all-accounts-${dateTime}.json`;
 
         await this.downloadJSON(allData, filename);
@@ -4252,15 +4255,22 @@ class CloudflareManager {
 
         // 生成日期时间
         const now = new Date();
-        const dateTime = now.getFullYear().toString() +
+        const dateTime = this.formatExportDateTime(now);
+
+        const filename = `Cloudflare Manager-${safeAccountName}-remark-${dateTime}.json`;
+        const result = await this.downloadJSON(data, filename);
+    }
+
+    /**
+     * 生成导出文件名用的日期时间字符串：YYYYMMDD-HHMMSS
+     */
+    formatExportDateTime(now = new Date()) {
+        return now.getFullYear().toString() +
             (now.getMonth() + 1).toString().padStart(2, '0') +
             now.getDate().toString().padStart(2, '0') + '-' +
             now.getHours().toString().padStart(2, '0') +
             now.getMinutes().toString().padStart(2, '0') +
             now.getSeconds().toString().padStart(2, '0');
-
-        const filename = `Cloudflare Manager-${safeAccountName}-remark-${dateTime}.json`;
-        const result = await this.downloadJSON(data, filename);
     }
 
     /**
@@ -4284,12 +4294,7 @@ class CloudflareManager {
         const safeAccountName = accountName.replace(/[<>:"/\\|?*]/g, '_');
 
         const now = new Date();
-        const dateTime = now.getFullYear().toString() +
-            (now.getMonth() + 1).toString().padStart(2, '0') +
-            now.getDate().toString().padStart(2, '0') + '-' +
-            now.getHours().toString().padStart(2, '0') +
-            now.getMinutes().toString().padStart(2, '0') +
-            now.getSeconds().toString().padStart(2, '0');
+        const dateTime = this.formatExportDateTime(now);
 
         return suffix ? `Cloudflare Manager-${safeAccountName}-${suffix}-${dateTime}.json` : `Cloudflare Manager-${safeAccountName}-${dateTime}.json`;
     }

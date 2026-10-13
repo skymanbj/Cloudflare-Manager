@@ -72,7 +72,8 @@ async function handleGetStorageUsage(sendResponse) {
       ? 1024 * 1024 * 1024  // 1GB
       : 5 * 1024 * 1024;    // 5MB
 
-    const percentage = Math.min(100, Math.round((bytesInUse / QUOTA_BYTES) * 100));
+    // unlimitedStorage 时 Chrome 实际上没有上限，百分比无意义
+    const percentage = hasUnlimitedStorage ? null : Math.min(100, Math.round((bytesInUse / QUOTA_BYTES) * 100));
 
     sendResponse({
       success: true,
@@ -203,6 +204,18 @@ async function getRemoteData(config) {
 }
 
 /**
+ * UTF-8 字符串转 Base64（替代已废弃的 unescape()）
+ */
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+/**
  * 推送数据到 GitHub
  */
 async function pushData(config, data, sha) {
@@ -212,7 +225,7 @@ async function pushData(config, data, sha) {
 
   const body = {
     message: `Auto sync - ${new Date().toISOString()}`,
-    content: btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2)))),
+    content: utf8ToBase64(JSON.stringify(data, null, 2)),
     branch: branch
   };
 
