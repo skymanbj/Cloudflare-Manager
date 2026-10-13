@@ -1,0 +1,14 @@
+{
+  "name": "cloudflare-manager",
+  "version": "2.3.3",
+  "description": "专业的 Cloudflare 资源管理浏览器扩展（Manifest V3）",
+  "private": true,
+  "scripts": {
+    "test": "node scripts/validate.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/skymanbj/Cloudflare-Manager.git"
+  },
+  "license": "MIT"
+}

@@ -16,3 +16,7 @@ Thumbs.db
 
 # ===== 本地工具数据 =====
 .workbuddy-ai/
+
+# ===== Node 依赖 =====
+node_modules/
+npm-debug.log*
