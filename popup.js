@@ -1345,6 +1345,7 @@ class CloudflareManager {
         // Header actions
         document.getElementById('refreshBtn').addEventListener('click', () => this.refresh());
         document.getElementById('exportBtn').addEventListener('click', () => this.exportData());
+        document.getElementById('exportAllBtn')?.addEventListener('click', () => this.exportAllAccountsData());
 
         // Welcome section
         document.getElementById('welcomeAddAccountBtn').addEventListener('click', () => this.openSidebar());
@@ -2526,6 +2527,222 @@ class CloudflareManager {
         const filename = `${safeAccountName}-${dateTime}.json`;
         await this.downloadJSON(allData, filename);
         // 注意：使用 a 标签下载无法准确知道用户是否完成保存，所以不显示完成消息
+    }
+
+    // =====================================================
+    // 导出所有账户数据（一次性导出全部账户）
+    // =====================================================
+
+    /**
+     * 通用 Cloudflare API 请求（指定 token，不依赖当前选中账户）
+     * 导出时按账户逐个抓取数据，不干扰当前视图状态
+     */
+    async cfApiFetch(endpoint, token) {
+        const url = `https://api.cloudflare.com/client/v4${endpoint}`;
+        const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${(token || '').trim()}` }
+        });
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.errors?.[0]?.message || '请求失败');
+        }
+        return data.result;
+    }
+
+    /**
+     * 抓取单个账户的完整数据快照（只读，不修改 this.zones / this.workers 等视图状态）
+     * @param {{id:string,name:string,token:string}} account
+     */
+    async fetchAccountSnapshot(account) {
+        const snapshot = {
+            id: account.id,
+            name: account.name,
+            zones: [],
+            dnsRecords: [],
+            workers: [],
+            pages: []
+        };
+
+        // 1. 域名列表（分页拉取）
+        try {
+            const perPage = 50;
+            let page = 1;
+            while (page <= 40) { // 安全上限：最多 2000 个域名，防止异常死循环
+                const batch = await this.cfApiFetch(`/zones?per_page=${perPage}&page=${page}`, account.token);
+                if (!Array.isArray(batch) || batch.length === 0) break;
+                snapshot.zones.push(...batch);
+                if (batch.length < perPage) break;
+                page++;
+            }
+        } catch (error) {
+            console.warn(`[ExportAll] 账户「${account.name}」域名加载失败:`, error);
+            snapshot.zoneError = error.message;
+        }
+
+        // 2. DNS 记录（按域名并发拉取）
+        const recordGroups = await Promise.all(snapshot.zones.map(async (zone) => {
+            try {
+                const records = await this.cfApiFetch(`/zones/${zone.id}/dns_records`, account.token);
+                return (records || []).map(record => ({
+                    zoneName: zone.name,
+                    type: record.type,
+                    name: record.name,
+                    content: record.content,
+                    ttl: record.ttl,
+                    proxied: record.proxied
+                }));
+            } catch (error) {
+                console.warn(`[ExportAll] ${zone.name} 记录加载失败:`, error);
+                return [];
+            }
+        }));
+        snapshot.dnsRecords = recordGroups.flat();
+
+        // 3. 收集该账户可见的所有 Cloudflare Account ID（用于 Workers / Pages）
+        const accountIds = new Map();
+        snapshot.zones.forEach(z => {
+            if (z.account?.id) accountIds.set(z.account.id, z.account.name || 'Unknown');
+        });
+        try {
+            const apiAccounts = await this.cfApiFetch('/accounts?per_page=50', account.token);
+            (apiAccounts || []).forEach(a => accountIds.set(a.id, a.name));
+        } catch (error) {
+            console.warn(`[ExportAll] 账户「${account.name}」/accounts 加载失败:`, error);
+        }
+
+        // 4. Workers / Pages
+        const resourceGroups = await Promise.all(Array.from(accountIds.entries()).map(async ([accId, accName]) => {
+            const workers = [];
+            const pages = [];
+            try {
+                const list = await this.cfApiFetch(`/accounts/${accId}/workers/scripts`, account.token);
+                (list || []).forEach(w => workers.push({
+                    id: w.id,
+                    accountId: accId,
+                    accountName: accName,
+                    created_on: w.created_on,
+                    modified_on: w.modified_on
+                }));
+            } catch (error) {
+                console.warn(`[ExportAll] Workers 加载失败 (${accName}):`, error);
+            }
+            try {
+                const list = await this.cfApiFetch(`/accounts/${accId}/pages/projects`, account.token);
+                (list || []).forEach(p => pages.push({
+                    name: p.name,
+                    subdomain: p.subdomain || p.name,
+                    url: `https://${p.subdomain || p.name}.pages.dev`,
+                    accountId: accId,
+                    accountName: accName,
+                    created_on: p.created_on
+                }));
+            } catch (error) {
+                console.warn(`[ExportAll] Pages 加载失败 (${accName}):`, error);
+            }
+            return { workers, pages };
+        }));
+        snapshot.workers = resourceGroups.flatMap(g => g.workers);
+        snapshot.pages = resourceGroups.flatMap(g => g.pages);
+
+        // 5. 精简 zones 输出字段
+        snapshot.zones = snapshot.zones.map(z => ({
+            id: z.id,
+            name: z.name,
+            status: z.status,
+            accountId: z.account?.id,
+            accountName: z.account?.name
+        }));
+
+        snapshot.summary = {
+            zones: snapshot.zones.length,
+            dnsRecords: snapshot.dnsRecords.length,
+            workers: snapshot.workers.length,
+            pages: snapshot.pages.length
+        };
+
+        return snapshot;
+    }
+
+    /**
+     * 导出所有账户的数据（右上角「导出所有账户」按钮）
+     */
+    async exportAllAccountsData() {
+        if (!this.accounts || this.accounts.length === 0) {
+            this.showToast('没有可导出的账户', 'warning');
+            return;
+        }
+
+        const confirmed = confirm(
+            `即将导出全部 ${this.accounts.length} 个账户的数据。\n\n` +
+            `包含：域名、DNS 记录、Workers、Pages 以及全部资源备注。\n` +
+            `导出时需要逐一向 Cloudflare 请求，账户较多时耗时较长，请耐心等待。\n\n是否继续？`
+        );
+        if (!confirmed) return;
+
+        this.showLoading();
+        this.showToast(`正在导出 ${this.accounts.length} 个账户的数据...`, 'info');
+
+        const allData = {
+            exportDate: new Date().toISOString(),
+            scope: 'all-accounts',
+            accountCount: this.accounts.length,
+            accounts: []
+        };
+
+        const failed = [];
+
+        // 账户之间串行处理，避免触发 Cloudflare API 限流
+        for (let i = 0; i < this.accounts.length; i++) {
+            const account = this.accounts[i];
+            this.showToast(`正在导出 (${i + 1}/${this.accounts.length})：${account.name}`, 'info');
+            try {
+                allData.accounts.push(await this.fetchAccountSnapshot(account));
+            } catch (error) {
+                console.error(`[ExportAll] 账户「${account.name}」导出失败:`, error);
+                failed.push(account.name);
+                allData.accounts.push({
+                    id: account.id,
+                    name: account.name,
+                    error: error.message,
+                    zones: [],
+                    dnsRecords: [],
+                    workers: [],
+                    pages: []
+                });
+            }
+        }
+
+        // 备注为全局共享（不按账户隔离），单独汇总一份
+        allData.remarks = Object.entries(this.remarks || {})
+            .filter(([_, v]) => v.content)
+            .map(([key, value]) => ({ key, ...value }));
+
+        // 总计
+        allData.summary = allData.accounts.reduce((acc, a) => {
+            acc.zones += a.zones?.length || 0;
+            acc.dnsRecords += a.dnsRecords?.length || 0;
+            acc.workers += a.workers?.length || 0;
+            acc.pages += a.pages?.length || 0;
+            return acc;
+        }, { zones: 0, dnsRecords: 0, workers: 0, pages: 0, remarks: allData.remarks.length });
+
+        const now = new Date();
+        const dateTime = now.getFullYear().toString() +
+            (now.getMonth() + 1).toString().padStart(2, '0') +
+            now.getDate().toString().padStart(2, '0') + '-' +
+            now.getHours().toString().padStart(2, '0') +
+            now.getMinutes().toString().padStart(2, '0') +
+            now.getSeconds().toString().padStart(2, '0');
+        const filename = `all-accounts-${dateTime}.json`;
+
+        await this.downloadJSON(allData, filename);
+        this.hideLoading();
+
+        if (failed.length > 0) {
+            this.showToast(`导出完成，但 ${failed.length} 个账户失败：${failed.join('、')}`, 'warning');
+        } else {
+            this.showToast(`已导出 ${this.accounts.length} 个账户的数据`, 'success');
+        }
     }
 
     async exportWorkers() {
