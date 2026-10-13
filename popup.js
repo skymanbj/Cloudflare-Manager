@@ -2443,7 +2443,7 @@ class CloudflareManager {
         ]);
 
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-        const filename = `all_dns_records_${new Date().toISOString().slice(0, 10)}.csv`;
+        const filename = `Cloudflare Manager-all_dns_records_${new Date().toISOString().slice(0, 10)}.csv`;
 
         const result = await this.downloadCSV(csv, filename);
     }
@@ -2524,7 +2524,7 @@ class CloudflareManager {
             now.getHours().toString().padStart(2, '0') +
             now.getMinutes().toString().padStart(2, '0') +
             now.getSeconds().toString().padStart(2, '0');
-        const filename = `${safeAccountName}-${dateTime}.json`;
+        const filename = `Cloudflare Manager-${safeAccountName}-${dateTime}.json`;
         await this.downloadJSON(allData, filename);
         // 注意：使用 a 标签下载无法准确知道用户是否完成保存，所以不显示完成消息
     }
@@ -2733,7 +2733,7 @@ class CloudflareManager {
             now.getHours().toString().padStart(2, '0') +
             now.getMinutes().toString().padStart(2, '0') +
             now.getSeconds().toString().padStart(2, '0');
-        const filename = `all-accounts-${dateTime}.json`;
+        const filename = `Cloudflare Manager-all-accounts-${dateTime}.json`;
 
         await this.downloadJSON(allData, filename);
         this.hideLoading();
@@ -2759,7 +2759,7 @@ class CloudflareManager {
         ]);
 
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-        const filename = `workers_${new Date().toISOString().slice(0, 10)}.csv`;
+        const filename = `Cloudflare Manager-workers_${new Date().toISOString().slice(0, 10)}.csv`;
 
         const result = await this.downloadCSV(csv, filename);
     }
@@ -3110,7 +3110,7 @@ class CloudflareManager {
         ]);
 
         const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-        const filename = `pages_${new Date().toISOString().slice(0, 10)}.csv`;
+        const filename = `Cloudflare Manager-pages_${new Date().toISOString().slice(0, 10)}.csv`;
 
         const result = await this.downloadCSV(csv, filename);
     }
@@ -4259,7 +4259,7 @@ class CloudflareManager {
             now.getMinutes().toString().padStart(2, '0') +
             now.getSeconds().toString().padStart(2, '0');
 
-        const filename = `${safeAccountName}-remark-${dateTime}.json`;
+        const filename = `Cloudflare Manager-${safeAccountName}-remark-${dateTime}.json`;
         const result = await this.downloadJSON(data, filename);
     }
 
@@ -4291,7 +4291,7 @@ class CloudflareManager {
             now.getMinutes().toString().padStart(2, '0') +
             now.getSeconds().toString().padStart(2, '0');
 
-        return suffix ? `${safeAccountName}-${suffix}-${dateTime}.json` : `${safeAccountName}-${dateTime}.json`;
+        return suffix ? `Cloudflare Manager-${safeAccountName}-${suffix}-${dateTime}.json` : `Cloudflare Manager-${safeAccountName}-${dateTime}.json`;
     }
 
     /**
@@ -4404,7 +4404,7 @@ class CloudflareManager {
             githubSyncConfig: githubConfig // Include GitHub config
         };
 
-        const filename = `cloudflare-accounts-config-${new Date().toISOString().slice(0, 10)}.json`;
+        const filename = `Cloudflare Manager-accounts-config-${new Date().toISOString().slice(0, 10)}.json`;
         await this.downloadJSON(data, filename);
         this.showToast(`账号配置已导出至 ${filename}`, 'success');
     }
