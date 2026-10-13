@@ -1,0 +1,15 @@
+# ===== 打包 / 压缩文件 =====
+*.7z
+*.zip
+*.rar
+
+# ===== Windows 系统文件 =====
+desktop.ini
+Thumbs.db
+
+# ===== Syncthing 同步冲突文件 =====
+*.sync-conflict-*
+
+# ===== 临时 / 日志 =====
+*.tmp
+*.log

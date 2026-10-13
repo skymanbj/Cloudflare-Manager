@@ -48,8 +48,10 @@ class GitHubSyncManager {
             const response = await fetch('https://api.github.com/user', {
                 headers: {
                     'Authorization': `Bearer ${token}`,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Cache-Control': 'no-cache'
+                },
+                cache: 'no-store'
             });
             return response.ok;
         } catch (error) {
@@ -87,8 +89,10 @@ class GitHubSyncManager {
             const response = await fetch(url, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Cache-Control': 'no-cache'
+                },
+                cache: 'no-store'
             });
 
             if (response.status === 404) {
@@ -119,7 +123,109 @@ class GitHubSyncManager {
         }
     }
 
-    // ... (pushData omitted) ...
+    // 推送数据到 GitHub
+    async pushData(data, sha) {
+        if (!this.config?.token || !this.config?.repo) {
+            throw new Error('GitHub 同步未配置');
+        }
+
+        let repoInput = (this.config.repo || '').trim();
+        repoInput = repoInput.replace(/^(https?:\/\/)?(www\.)?github\.com\//, '').replace(/\.git$/, '');
+        const parts = repoInput.split('/');
+        if (parts.length < 2) {
+            throw new Error('仓库格式错误');
+        }
+        const owner = parts[0];
+        const repo = parts[1];
+        const branch = this.config.branch || 'main';
+        const url = `https://api.github.com/repos/${owner}/${repo}/contents/${this.SYNC_FILE_PATH}`;
+
+        const body = {
+            message: `Manual sync - ${new Date().toISOString()}`,
+            content: btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2)))),
+            branch: branch
+        };
+
+        if (sha) {
+            body.sha = sha;
+        }
+
+        const token = (this.config.token || '').trim();
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Push failed: ${response.status}`);
+        }
+    }
+
+    // 执行全量同步（拉取合并后推送）
+    async syncNow() {
+        if (this.syncInProgress) return;
+
+        this.syncInProgress = true;
+        this.setSyncStatus('syncing', '正在同步...');
+
+        try {
+            // 获取远程数据
+            let remoteData = { remarks: {}, deletedKeys: [], sha: null };
+            try {
+                remoteData = await this.getRemoteData();
+            } catch (e) {
+                if (e.message.indexOf('404') === -1 && e.message.indexOf('未配置') === -1) {
+                    throw e;
+                }
+            }
+
+            // 获取本地删除记录
+            const { deletedKeys = [] } = await this.getLocalDeletedKeys();
+
+            // 合并数据
+            const merged = this.mergeRemarks(this.manager.remarks, remoteData.remarks || {}, [...(remoteData.deletedKeys || []), ...deletedKeys]);
+
+            // 保存合并后的数据到本地
+            this.manager.remarks = merged.remarks;
+            await this.manager.saveRemarksToStorage();
+
+            // 推送到远程
+            const syncData = {
+                version: '1.0',
+                syncTime: new Date().toISOString(),
+                remarks: merged.remarks,
+                deletedKeys: merged.allDeletedKeys,
+                metadata: {
+                    totalRemarks: Object.keys(merged.remarks).length
+                }
+            };
+
+            await this.pushData(syncData, remoteData.sha);
+
+            // 清理本地删除记录
+            await this.clearLocalDeletedKeys();
+
+            // 更新配置时间
+            this.config.lastSyncTime = new Date().toISOString();
+            await this.saveConfig(this.config);
+
+            this.setSyncStatus('connected', '同步成功');
+            this.manager.showToast('同步完成', 'success');
+            this.manager.refreshCurrentView();
+
+        } catch (error) {
+            console.error('[GitHubSync] Sync failed:', error);
+            this.setSyncStatus('error', '同步失败');
+            this.manager.showToast('同步失败: ' + error.message, 'error');
+        } finally {
+            this.syncInProgress = false;
+        }
+    }
 
     // 只拉取远程数据
     async pullFromGithub() {
@@ -411,8 +517,22 @@ class CloudflareManager {
             chrome.storage.local.get([cacheKey], (result) => {
                 const cache = result[cacheKey] || {};
                 if (cache.zones) this.zones = cache.zones;
-                if (cache.workers) this.workers = cache.workers;
-                if (cache.pages) this.pages = cache.pages;
+                if (cache.workers) {
+                    this.workers = cache.workers;
+                    this.workers.sort((a, b) => {
+                        const dateA = a.created_on ? new Date(a.created_on).getTime() : 0;
+                        const dateB = b.created_on ? new Date(b.created_on).getTime() : 0;
+                        return dateB - dateA;
+                    });
+                }
+                if (cache.pages) {
+                    this.pages = cache.pages;
+                    this.pages.sort((a, b) => {
+                        const dateA = a.created_on ? new Date(a.created_on).getTime() : 0;
+                        const dateB = b.created_on ? new Date(b.created_on).getTime() : 0;
+                        return dateB - dateA;
+                    });
+                }
                 if (cache.allRecords) this.allRecords = cache.allRecords;
                 console.log(`[Cache] Loaded resource cache for account: ${this.currentAccount?.name}`);
                 resolve();
@@ -851,14 +971,7 @@ class CloudflareManager {
         // 只有当至少加载到一些数据，或者虽然报错但之前是空的（首次加载），才更新
         // 如果之前有数据（缓存），且这次完全失败（hasError && newZones.length === 0），则不覆盖，保留缓存
         if (newZones.length > 0 || !hasError || this.zones.length === 0) {
-            // 在保存前，尝试强制补全/修正账户名称（统一显示逻辑）
-            this.zones = newZones.map(z => {
-                if (z.account && z.account.id) {
-                    z.account.name = this.getAccountDisplayName(z.account.id, z.account.name);
-                }
-                return z;
-            });
-
+            this.zones = newZones;
             if (hasError && this.zones.length > 0) {
                 this.showToast('仅加载了部分域名 (网络中断)', 'warning');
             }
@@ -883,7 +996,7 @@ class CloudflareManager {
                     ...record,
                     zoneName: zone.name,
                     zoneId: zone.id,
-                    accountName: this.getAccountDisplayName(zone.account?.id, zone.account?.name),
+                    accountName: zone.account?.name || 'Unknown',
                     accountId: zone.account?.id || 'unknown'
                 }));
                 this.allRecords.push(...recordsWithZone);
@@ -916,27 +1029,6 @@ class CloudflareManager {
     }
 
     // Workers API Methods
-    /**
-     * 获取账户显示名称（优先寻找本地定义的别名）
-     * @param {string} accountId Cloudflare Account ID
-     * @param {string} fallbackName 备用名称（通常是 API 返回的原始名称）
-     * @returns {string} 最终显示的账户名
-     */
-    getAccountDisplayName(accountId, fallbackName) {
-        if (!accountId) return fallbackName || 'Unknown';
-
-        // 如果这个 accountId 匹配当前选中的账户解析出的 ID
-        // 注意：this.accountId 是在 getAccountId() 中异步确定的
-        if (this.accountId && accountId === this.accountId && this.currentAccount) {
-            return this.currentAccount.name;
-        }
-
-        // 也可以遍历所有本地账户尝试匹配（如果以后我们在本地存储了 accountId 的话）
-        // 目前仅匹配当前选中账户，因为我们没有全局的 accountId -> localName 映射
-
-        return fallbackName || 'Unknown';
-    }
-
     async getAccountId() {
         if (this.accountId) return this.accountId;
 
@@ -1027,13 +1119,7 @@ class CloudflareManager {
                 const apiAccounts = await this.apiRequest('/accounts?per_page=50');
                 if (Array.isArray(apiAccounts)) {
                     apiAccounts.forEach(acc => {
-                        // 如果 Map 中已经有了（通常是步骤 1 中的当前账户），且名字被优化过，则不要覆盖
-                        if (!uniqueAccounts.has(acc.id)) {
-                            uniqueAccounts.set(acc.id, { 
-                                id: acc.id, 
-                                name: this.getAccountDisplayName(acc.id, acc.name) 
-                            });
-                        }
+                        uniqueAccounts.set(acc.id, { id: acc.id, name: acc.name });
                     });
                 }
             } catch (e) {
@@ -1102,14 +1188,11 @@ class CloudflareManager {
 
             if (newWorkers.length > 0 || this.workers.length === 0) {
                 this.workers = newWorkers;
-                // Sort: Account Name -> Worker ID
+                // Sort: created_on descending (from newest to oldest)
                 this.workers.sort((a, b) => {
-                    const accountA = a.account?.name || '';
-                    const accountB = b.account?.name || '';
-                    if (accountA !== accountB) {
-                        return accountA.localeCompare(accountB);
-                    }
-                    return a.id.localeCompare(b.id);
+                    const dateA = a.created_on ? new Date(a.created_on).getTime() : 0;
+                    const dateB = b.created_on ? new Date(b.created_on).getTime() : 0;
+                    return dateB - dateA;
                 });
             } else {
                 console.log('[Workers] Retaining cached workers due to empty fetch result (possibly offline).');
@@ -1177,12 +1260,7 @@ class CloudflareManager {
                 const apiAccounts = await this.apiRequest('/accounts?per_page=50');
                 if (Array.isArray(apiAccounts)) {
                     apiAccounts.forEach(acc => {
-                        if (!uniqueAccounts.has(acc.id)) {
-                            uniqueAccounts.set(acc.id, { 
-                                id: acc.id, 
-                                name: this.getAccountDisplayName(acc.id, acc.name) 
-                            });
-                        }
+                        uniqueAccounts.set(acc.id, { id: acc.id, name: acc.name });
                     });
                 }
             } catch (e) {
@@ -1232,22 +1310,19 @@ class CloudflareManager {
             this.pages = results.flat();
             console.log(`[Pages] Total pages loaded: ${this.pages.length} from ${allAccounts.length} accounts.`);
 
+            // Sort: created_on descending (from newest to oldest)
+            this.pages.sort((a, b) => {
+                const dateA = a.created_on ? new Date(a.created_on).getTime() : 0;
+                const dateB = b.created_on ? new Date(b.created_on).getTime() : 0;
+                return dateB - dateA;
+            });
+
             await this.saveResourceCache(); // 保存缓存
 
             // 异步补全
             if (this.currentTab === 'notes') {
                 this.loadRemarksAndRender();
             }
-
-            // Sort: Account Name -> Page Name
-            this.pages.sort((a, b) => {
-                const accountA = a.account?.name || '';
-                const accountB = b.account?.name || '';
-                if (accountA !== accountB) {
-                    return accountA.localeCompare(accountB);
-                }
-                return a.name.localeCompare(b.name);
-            });
 
             this.isLoadingPages = false;
             return this.pages;
@@ -3505,18 +3580,10 @@ class CloudflareManager {
 
             // 2. 智能多次重试机制：持续检测直到资源加载完成（最多 5 次）
             const anyLoading = this.isLoadingZones || this.isLoadingWorkers || this.isLoadingPages;
-            
-            // 优化：检查是否真的有尚未匹配到账号的备注（且对应的资源库已非空）
-            const hasUnmatchedRemarks = Object.values(this.remarks).some(r => 
-                r && (r.type === 'worker' || r.type === 'page') && (!r.accountId || r.accountId === 'unknown' || r.accountId === 'null')
-            );
-            
-            // 如果列表为空且存在对应分类的备注，或者存在未匹配项且资源库非空
+            // 如果列表为空且存在对应分类的备注，说明匹配池尚未就绪
             const hasWorkerRemarks = Object.keys(this.remarks).some(k => k.startsWith('worker:'));
             const hasPageRemarks = Object.keys(this.remarks).some(k => k.startsWith('page:'));
-            const pendingData = (this.workers.length === 0 && hasWorkerRemarks) || 
-                               (this.pages.length === 0 && hasPageRemarks) ||
-                               (hasUnmatchedRemarks && (this.workers.length > 0 || this.pages.length > 0));
+            const pendingData = (this.workers.length === 0 && hasWorkerRemarks) || (this.pages.length === 0 && hasPageRemarks);
 
             if ((anyLoading || pendingData) && !this.remarksReloadRegistered && this.remarksRetryCount < this.remarksMaxRetries) {
                 this.remarksRetryCount++;
@@ -3607,14 +3674,6 @@ class CloudflareManager {
                             if (worker && worker.account) {
                                 value.accountId = worker.account.id;
                                 value.accountName = worker.account.name;
-                            } else {
-                                // 容错匹配：尝试在 Pages 中寻找
-                                const pageFallback = this.pages.find(p => (p.name || '').toLowerCase() === searchId);
-                                if (pageFallback && pageFallback.account) {
-                                    value.accountId = pageFallback.account.id;
-                                    value.accountName = pageFallback.account.name;
-                                    console.log(`[Remarks] Cross-type match success: Worker "${searchId}" found in Pages.`);
-                                }
                             }
                         } else if (value.type === 'page') {
                             const searchId = (value.id || '').toLowerCase().trim();
@@ -3625,14 +3684,6 @@ class CloudflareManager {
                             if (page && page.account) {
                                 value.accountId = page.account.id;
                                 value.accountName = page.account.name;
-                            } else {
-                                // 容错匹配：尝试在 Workers 中寻找
-                                const workerFallback = this.workers.find(w => (w.id || '').toLowerCase() === searchId || (w.name || '').toLowerCase() === searchId);
-                                if (workerFallback && workerFallback.account) {
-                                    value.accountId = workerFallback.account.id;
-                                    value.accountName = workerFallback.account.name;
-                                    console.log(`[Remarks] Cross-type match success: Page "${searchId}" found in Workers.`);
-                                }
                             }
                         }
                     }
@@ -3688,7 +3739,14 @@ class CloudflareManager {
                 'page': '📄 Pages'
             };
 
-            Object.entries(grouped).forEach(([type, remarks]) => {
+            // 按照各分组中最新备注的生成/修改时间从新到旧对分组进行排序
+            const sortedGroupedEntries = Object.entries(grouped).sort((a, b) => {
+                const maxA = Math.max(...a[1].map(r => r.updatedAt ? new Date(r.updatedAt).getTime() : 0));
+                const maxB = Math.max(...b[1].map(r => r.updatedAt ? new Date(r.updatedAt).getTime() : 0));
+                return maxB - maxA;
+            });
+
+            sortedGroupedEntries.forEach(([type, remarks]) => {
                 const isCollapsed = this.collapsedRemarkGroups.has(type);
                 const groupDiv = document.createElement('div');
                 groupDiv.className = `remarks-group ${isCollapsed ? 'collapsed' : ''}`;
@@ -3767,20 +3825,13 @@ class CloudflareManager {
                                 return wId === searchId || wName === searchId || wId === searchName || wName === searchName;
                             });
 
-                             if (worker && worker.account) {
+                            if (worker && worker.account) {
                                 finalAccountName = worker.account.name;
                                 finalAccountId = worker.account.id;
                             } else {
-                                // 容错匹配：尝试在 Pages 中寻找
-                                const pageFallback = this.pages.find(p => (p.name || '').toLowerCase() === searchId || (p.id || '').toLowerCase() === searchId);
-                                if (pageFallback && pageFallback.account) {
-                                    finalAccountName = pageFallback.account.name;
-                                    finalAccountId = pageFallback.account.id;
-                                } else {
-                                    // 诊断日志：如果是第一个失败的，输出匹配池样例
-                                    if (remarks.indexOf(remark) === 0 && this.workers.length > 0) {
-                                        console.debug(`[Remarks] Worker match failed. ID: "${remark.id}". Pool: ${this.workers.length} workers, ${this.pages.length} pages.`);
-                                    }
+                                // 诊断日志：如果是第一个失败的，输出匹配池样例
+                                if (remarks.indexOf(remark) === 0 && this.workers.length > 0) {
+                                    console.debug(`[Remarks] First remark match failed. ID: "${remark.id}". Pool size: ${this.workers.length}.`);
                                 }
                             }
                         } else if (remark.type === 'page') {
@@ -3793,16 +3844,9 @@ class CloudflareManager {
                                 const pName = (p.name || '').toLowerCase().trim();
                                 return pId === searchId || pName === searchId || pId === searchName || pName === searchName;
                             });
-                             if (page && page.account) {
+                            if (page && page.account) {
                                 finalAccountName = page.account.name;
                                 finalAccountId = page.account.id;
-                            } else {
-                                // 容错匹配：尝试在 Workers 中寻找
-                                const workerFallback = this.workers.find(w => (w.id || '').toLowerCase() === searchId || (w.name || '').toLowerCase() === searchId);
-                                if (workerFallback && workerFallback.account) {
-                                    finalAccountName = workerFallback.account.name;
-                                    finalAccountId = workerFallback.account.id;
-                                }
                             }
                         }
                     }
@@ -3816,7 +3860,7 @@ class CloudflareManager {
                     } else {
                         // 最终确实没匹配到
                         if (remark.type === 'worker' && this.workers.length > 0 && remarks.indexOf(remark) === 0) {
-                            console.warn(`[Remarks] Worker Match Missing! Name: "${displayName}", ID: "${remark.id}". This resource might be deleted or from an unscanned account.`);
+                            console.warn(`[Remarks] Worker Match Failed! Remark ID: "${remark.id}". Pool size: ${this.workers.length}`);
                         }
                     }
 
