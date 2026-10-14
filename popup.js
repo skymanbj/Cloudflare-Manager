@@ -11,7 +11,7 @@ class GitHubSyncManager {
         this.manager = manager;
         this.config = null;
         this.syncInProgress = false;
-        this.SYNC_FILE_PATH = 'cf-remarks.json';
+        this.SYNC_FILE_PATH = GitHubSyncCore.SYNC_FILE_PATH;
     }
 
     // 加载配置
@@ -60,67 +60,9 @@ class GitHubSyncManager {
         }
     }
 
-    // 获取远程数据
+    // 获取远程数据（实现见 js/github-sync.js，与后台同步共用同一逻辑）
     async getRemoteData() {
-        if (!this.config?.token || !this.config?.repo) {
-            throw new Error('GitHub 同步未配置');
-        }
-
-        // Robust repo parsing
-        let repoInput = (this.config.repo || '').trim();
-        // Remove protocol and domain if present
-        repoInput = repoInput.replace(/^(https?:\/\/)?(www\.)?github\.com\//, '').replace(/\.git$/, '');
-
-        const parts = repoInput.split('/');
-        if (parts.length < 2) {
-            throw new Error('仓库格式错误，应为 "用户名/仓库名" (Owner/Repo)');
-        }
-        const owner = parts[0];
-        const repo = parts[1]; // Ignore subsequent parts (like /blob/main/...)
-
-        const branch = this.config.branch || 'main';
-        const url = `https://api.github.com/repos/${owner}/${repo}/contents/${this.SYNC_FILE_PATH}?ref=${branch}`;
-
-        // Sanitize token
-        const token = (this.config.token || '').trim();
-
-        try {
-            console.log(`[GitHubSync] Fetching from ${url}`);
-            const response = await fetch(url, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Accept': 'application/vnd.github.v3+json',
-                    'Cache-Control': 'no-cache'
-                },
-                cache: 'no-store'
-            });
-
-            if (response.status === 404) {
-                console.warn('[GitHubSync] Remote file not found (404), returning empty data.');
-                // 文件不存在，返回空数据
-                return { remarks: {}, deletedKeys: [], sha: null };
-            }
-
-            if (!response.ok) {
-                throw new Error(`GitHub API 错误: ${response.status}`);
-            }
-
-            const data = await response.json();
-            // 使用 TextDecoder 处理 UTF-8 字符（避免 Base64 直接解码乱码）
-            const binaryString = atob(data.content);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            const contentText = new TextDecoder('utf-8').decode(bytes);
-            const content = JSON.parse(contentText);
-
-            console.log(`[GitHubSync] Fetched remote data. key_count=${content.remarks ? Object.keys(content.remarks).length : 0}`);
-            return { ...content, sha: data.sha };
-        } catch (error) {
-            console.error('[GitHubSync] Failed to get remote data:', error);
-            throw error;
-        }
+        return GitHubSyncCore.getRemoteData(this.config);
     }
 
     /**
@@ -128,55 +70,12 @@ class GitHubSyncManager {
      * 替代已废弃的 unescape()，确保中文等多字节字符编码正确
      */
     utf8ToBase64(str) {
-        const bytes = new TextEncoder().encode(str);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        return btoa(binary);
+        return GitHubSyncCore.utf8ToBase64(str);
     }
 
-    // 推送数据到 GitHub
+    // 推送数据到 GitHub（实现见 js/github-sync.js，与后台同步共用同一逻辑）
     async pushData(data, sha) {
-        if (!this.config?.token || !this.config?.repo) {
-            throw new Error('GitHub 同步未配置');
-        }
-
-        let repoInput = (this.config.repo || '').trim();
-        repoInput = repoInput.replace(/^(https?:\/\/)?(www\.)?github\.com\//, '').replace(/\.git$/, '');
-        const parts = repoInput.split('/');
-        if (parts.length < 2) {
-            throw new Error('仓库格式错误');
-        }
-        const owner = parts[0];
-        const repo = parts[1];
-        const branch = this.config.branch || 'main';
-        const url = `https://api.github.com/repos/${owner}/${repo}/contents/${this.SYNC_FILE_PATH}`;
-
-        const body = {
-            message: `Manual sync - ${new Date().toISOString()}`,
-            content: this.utf8ToBase64(JSON.stringify(data, null, 2)),
-            branch: branch
-        };
-
-        if (sha) {
-            body.sha = sha;
-        }
-
-        const token = (this.config.token || '').trim();
-        const response = await fetch(url, {
-            method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(body)
-        });
-
-        if (!response.ok) {
-            throw new Error(`Push failed: ${response.status}`);
-        }
+        return GitHubSyncCore.pushData(this.config, data, sha, 'Manual sync');
     }
 
     // 执行全量同步（拉取合并后推送）
@@ -345,34 +244,9 @@ class GitHubSyncManager {
         }
     }
 
-    // 合并备注数据（基于时间戳）
+    // 合并备注数据（基于时间戳，实现见 js/github-sync.js）
     mergeRemarks(local, remote, deletedKeys = []) {
-        const result = {};
-        const allKeys = new Set([...Object.keys(local), ...Object.keys(remote)]);
-        const allDeletedKeys = [...new Set(deletedKeys)];
-
-        for (const key of allKeys) {
-            // 如果 key 在删除列表中，跳过
-            if (deletedKeys.includes(key)) {
-                continue;
-            }
-
-            const localItem = local[key];
-            const remoteItem = remote[key];
-
-            if (localItem && remoteItem) {
-                // 两边都有，比较时间戳
-                const localTime = new Date(localItem.updatedAt || 0).getTime();
-                const remoteTime = new Date(remoteItem.updatedAt || 0).getTime();
-                result[key] = localTime >= remoteTime ? localItem : remoteItem;
-            } else if (localItem) {
-                result[key] = localItem;
-            } else if (remoteItem) {
-                result[key] = remoteItem;
-            }
-        }
-
-        return { remarks: result, allDeletedKeys };
+        return GitHubSyncCore.mergeRemarks(local, remote, deletedKeys);
     }
 
     // 记录删除操作

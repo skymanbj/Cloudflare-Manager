@@ -5,6 +5,9 @@
 
 console.log("[CloudflareManager] Background service worker started");
 
+// 加载 GitHub 同步核心逻辑（与 popup.js 共用同一实现）
+importScripts('js/github-sync.js');
+
 // =====================================================
 // 点击扩展图标时打开管理页面
 // =====================================================
@@ -95,7 +98,6 @@ async function handleGetStorageUsage(sendResponse) {
 // GitHub 定时同步
 // =====================================================
 const SYNC_ALARM_NAME = 'github-sync-alarm';
-const SYNC_FILE_PATH = 'cf-remarks.json';
 
 /**
  * 设置定时同步
@@ -137,24 +139,18 @@ async function performBackgroundSync() {
     const remarks = cfRemarks || {};
 
     // 获取远程数据
-    const remoteData = await getRemoteData(githubSyncConfig);
+    const remoteData = await GitHubSyncCore.getRemoteData(githubSyncConfig);
 
     // 合并数据
-    const merged = mergeRemarks(remarks, remoteData.remarks || {}, remoteData.deletedKeys || []);
+    const merged = GitHubSyncCore.mergeRemarks(remarks, remoteData.remarks || {}, remoteData.deletedKeys || []);
 
     // 保存到本地
     await chrome.storage.local.set({ cfRemarks: merged.remarks });
 
     // 推送到远程
-    const syncData = {
-      version: '1.0',
-      syncTime: new Date().toISOString(),
-      remarks: merged.remarks,
-      deletedKeys: merged.allDeletedKeys,
-      metadata: { totalRemarks: Object.keys(merged.remarks).length }
-    };
+    const syncData = GitHubSyncCore.buildSyncPayload(merged.remarks, merged.allDeletedKeys);
 
-    await pushData(githubSyncConfig, syncData, remoteData.sha);
+    await GitHubSyncCore.pushData(githubSyncConfig, syncData, remoteData.sha, 'Auto sync');
 
     // 更新最后同步时间
     githubSyncConfig.lastSyncTime = new Date().toISOString();
@@ -164,116 +160,6 @@ async function performBackgroundSync() {
   } catch (error) {
     console.error('[Sync] Background sync failed:', error);
   }
-}
-
-/**
- * 获取远程数据
- */
-async function getRemoteData(config) {
-  const [owner, repo] = config.repo.split('/');
-  const branch = config.branch || 'main';
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${SYNC_FILE_PATH}?ref=${branch}`;
-
-  const response = await fetch(url, {
-    headers: {
-      'Authorization': `Bearer ${config.token}`,
-      'Accept': 'application/vnd.github.v3+json',
-      'Cache-Control': 'no-cache'
-    },
-    cache: 'no-store'
-  });
-
-  if (response.status === 404) {
-    return { remarks: {}, deletedKeys: [], sha: null };
-  }
-
-  if (!response.ok) {
-    throw new Error(`GitHub API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  // 使用 TextDecoder 处理 UTF-8 字符（避免 Base64 直接解码导致中文乱码）
-  const binaryString = atob(data.content);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  const contentText = new TextDecoder('utf-8').decode(bytes);
-  const content = JSON.parse(contentText);
-  return { ...content, sha: data.sha };
-}
-
-/**
- * UTF-8 字符串转 Base64（替代已废弃的 unescape()）
- */
-function utf8ToBase64(str) {
-  const bytes = new TextEncoder().encode(str);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-/**
- * 推送数据到 GitHub
- */
-async function pushData(config, data, sha) {
-  const [owner, repo] = config.repo.split('/');
-  const branch = config.branch || 'main';
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${SYNC_FILE_PATH}`;
-
-  const body = {
-    message: `Auto sync - ${new Date().toISOString()}`,
-    content: utf8ToBase64(JSON.stringify(data, null, 2)),
-    branch: branch
-  };
-
-  if (sha) {
-    body.sha = sha;
-  }
-
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${config.token}`,
-      'Accept': 'application/vnd.github.v3+json',
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  });
-
-  if (!response.ok) {
-    throw new Error(`Push failed: ${response.status}`);
-  }
-}
-
-/**
- * 合并备注数据
- */
-function mergeRemarks(local, remote, deletedKeys = []) {
-  const result = {};
-  const allKeys = new Set([...Object.keys(local), ...Object.keys(remote)]);
-  const allDeletedKeys = [...new Set(deletedKeys)];
-
-  for (const key of allKeys) {
-    if (deletedKeys.includes(key)) continue;
-
-    const localItem = local[key];
-    const remoteItem = remote[key];
-
-    if (localItem && remoteItem) {
-      const localTime = new Date(localItem.updatedAt || 0).getTime();
-      const remoteTime = new Date(remoteItem.updatedAt || 0).getTime();
-      result[key] = localTime >= remoteTime ? localItem : remoteItem;
-    } else if (localItem) {
-      result[key] = localItem;
-    } else if (remoteItem) {
-      result[key] = remoteItem;
-    }
-  }
-
-  return { remarks: result, allDeletedKeys };
 }
 
 /**

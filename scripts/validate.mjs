@@ -29,7 +29,7 @@ const abs = (p) => path.join(root, p);
 // 用 vm.Script 在进程内编译（只编译不执行）来检查语法，
 // 避免 execFileSync 在部分 Windows 环境下触发 spawn EBUSY。
 console.log('\n[1/5] JS 语法检查');
-const jsFiles = ['popup.js', 'background.js', 'content.js', 'marked.min.js'];
+const jsFiles = ['popup.js', 'background.js', 'content.js', 'marked.min.js', 'js/github-sync.js'];
 for (const f of jsFiles) {
   try {
     new vm.Script(readFileSync(abs(f), 'utf8'), { filename: f });
@@ -149,6 +149,20 @@ try {
   }
 } catch (e) {
   bad(`读取 popup.html 失败: ${e.message}`);
+}
+
+// ---------- 5b. importScripts 引用 ----------
+console.log('\n[5b] importScripts 引用');
+try {
+  const sw = readFileSync(abs('background.js'), 'utf8');
+  const scripts = [...sw.matchAll(/importScripts\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1]);
+  if (scripts.length === 0) warn('background.js 未使用 importScripts');
+  for (const s of scripts) {
+    if (existsSync(abs(s))) ok(`importScripts -> ${s}`);
+    else bad(`importScripts 目标不存在: ${s}`);
+  }
+} catch (e) {
+  bad(`读取 background.js 失败: ${e.message}`);
 }
 
 // ---------- 汇总 ----------
