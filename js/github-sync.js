@@ -215,3 +215,337 @@ const GitHubSyncCore = {
         };
     }
 };
+
+// =====================================================
+// GitHub Sync Manager - GitHub 备注同步管理器
+// =====================================================
+class GitHubSyncManager {
+    constructor(manager) {
+        this.manager = manager;
+        this.config = null;
+        this.syncInProgress = false;
+        this.SYNC_FILE_PATH = GitHubSyncCore.SYNC_FILE_PATH;
+    }
+
+    // 加载配置
+    async loadConfig() {
+        return new Promise((resolve) => {
+            chrome.storage.local.get('githubSyncConfig', (result) => {
+                this.config = result.githubSyncConfig || null;
+                this.updateSyncStatusUI();
+                this.updateSyncSettingsUI();
+                resolve(this.config);
+            });
+        });
+    }
+
+    // 保存配置
+    async saveConfig(config) {
+        this.config = config;
+        return new Promise((resolve, reject) => {
+            chrome.storage.local.set({ githubSyncConfig: config }, () => {
+                if (chrome.runtime.lastError) {
+                    reject(chrome.runtime.lastError);
+                } else {
+                    // background.js 通过 storage.onChanged 监听变化并更新定时器
+                    // 无需再次发送 sendMessage，避免 "No SW" 错误
+                    resolve();
+                }
+            });
+        });
+    }
+
+    // 验证 GitHub Token
+    async validateToken(token) {
+        try {
+            const response = await fetch('https://api.github.com/user', {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Cache-Control': 'no-cache'
+                },
+                cache: 'no-store'
+            });
+            return response.ok;
+        } catch (error) {
+            console.error('[GitHubSync] Token validation failed:', error);
+            return false;
+        }
+    }
+
+    // 获取远程数据（实现见 js/github-sync.js，与后台同步共用同一逻辑）
+    async getRemoteData() {
+        return GitHubSyncCore.getRemoteData(this.config);
+    }
+
+    /**
+     * UTF-8 字符串转 Base64
+     * 替代已废弃的 unescape()，确保中文等多字节字符编码正确
+     */
+    utf8ToBase64(str) {
+        return GitHubSyncCore.utf8ToBase64(str);
+    }
+
+    // 推送数据到 GitHub（实现见 js/github-sync.js，与后台同步共用同一逻辑）
+    async pushData(data, sha) {
+        return GitHubSyncCore.pushData(this.config, data, sha, 'Manual sync');
+    }
+
+    // 执行全量同步（拉取合并后推送）
+    async syncNow() {
+        if (this.syncInProgress) return;
+
+        this.syncInProgress = true;
+        this.setSyncStatus('syncing', '正在同步...');
+
+        try {
+            // 获取远程数据
+            let remoteData = { remarks: {}, deletedKeys: [], sha: null };
+            try {
+                remoteData = await this.getRemoteData();
+            } catch (e) {
+                if (e.message.indexOf('404') === -1 && e.message.indexOf('未配置') === -1) {
+                    throw e;
+                }
+            }
+
+            // 获取本地删除记录
+            const { deletedKeys = [] } = await this.getLocalDeletedKeys();
+
+            // 合并数据
+            const merged = this.mergeRemarks(this.manager.remarks, remoteData.remarks || {}, [...(remoteData.deletedKeys || []), ...deletedKeys]);
+
+            // 保存合并后的数据到本地
+            this.manager.remarks = merged.remarks;
+            await this.manager.saveRemarksToStorage();
+
+            // 推送到远程
+            const syncData = {
+                version: '1.0',
+                syncTime: new Date().toISOString(),
+                remarks: merged.remarks,
+                deletedKeys: merged.allDeletedKeys,
+                metadata: {
+                    totalRemarks: Object.keys(merged.remarks).length
+                }
+            };
+
+            await this.pushData(syncData, remoteData.sha);
+
+            // 清理本地删除记录
+            await this.clearLocalDeletedKeys();
+
+            // 更新配置时间
+            this.config.lastSyncTime = new Date().toISOString();
+            await this.saveConfig(this.config);
+
+            this.setSyncStatus('connected', '同步成功');
+            this.manager.showToast('同步完成', 'success');
+            this.manager.refreshCurrentView();
+
+        } catch (error) {
+            console.error('[GitHubSync] Sync failed:', error);
+            this.setSyncStatus('error', '同步失败');
+            this.manager.showToast('同步失败: ' + error.message, 'error');
+        } finally {
+            this.syncInProgress = false;
+        }
+    }
+
+    // 只拉取远程数据
+    async pullFromGithub() {
+        if (this.syncInProgress) return;
+
+        this.syncInProgress = true;
+        this.setSyncStatus('syncing', '正在拉取...');
+
+        try {
+            const remoteData = await this.getRemoteData();
+
+            // Check for 404 (sha is null)
+            if (!remoteData.sha) {
+                const [owner, repo] = (this.config.repo || '').split('/');
+                const branch = this.config.branch || 'main';
+
+                console.warn(`[GitHubSync] File not found: ${owner}/${repo}/${this.SYNC_FILE_PATH}`);
+
+                this.setSyncStatus('error', '文件未找到');
+                this.manager.showToast(`错误: 远程文件 ${this.SYNC_FILE_PATH} 不存在 (404)\n请检查分支: ${branch}`, 'error');
+
+                this.syncInProgress = false;
+                return;
+            }
+
+            const remoteCount = remoteData.remarks ? Object.keys(remoteData.remarks).length : 0;
+            console.log(`[GitHubSync] Pull success. Remote keys: ${remoteCount}`);
+
+            // 处理删除的 key
+            if (remoteData.deletedKeys) {
+                for (const key of remoteData.deletedKeys) {
+                    delete this.manager.remarks[key];
+                }
+            }
+
+            // 合并远程数据（远程优先）
+            if (remoteData.remarks) {
+                Object.assign(this.manager.remarks, remoteData.remarks);
+            }
+
+            const totalCount = Object.keys(this.manager.remarks).length;
+            console.log(`[GitHubSync] Merged local keys. Total keys: ${totalCount}`);
+
+            await this.manager.saveRemarksToStorage();
+
+            this.config.lastSyncTime = new Date().toISOString();
+            await this.saveConfig(this.config);
+
+            this.setSyncStatus('connected', '拉取成功');
+            this.manager.showToast(`拉取完成 (共 ${totalCount} 条备注)`, 'success');
+            this.manager.refreshCurrentView();
+
+        } catch (error) {
+            this.setSyncStatus('error', '拉取失败');
+            this.manager.showToast('拉取失败: ' + error.message, 'error');
+        } finally {
+            this.syncInProgress = false;
+        }
+    }
+
+    // 只推送本地数据
+    async pushToGithub() {
+        if (this.syncInProgress) return;
+
+        this.syncInProgress = true;
+        this.setSyncStatus('syncing', '正在推送...');
+
+        try {
+            // 先获取远程 sha
+            let sha = null;
+            try {
+                const remoteData = await this.getRemoteData();
+                sha = remoteData.sha;
+            } catch (e) {
+                // 文件不存在，不需要 sha
+            }
+
+            const { deletedKeys = [] } = await this.getLocalDeletedKeys();
+
+            const syncData = {
+                version: '1.0',
+                syncTime: new Date().toISOString(),
+                remarks: this.manager.remarks,
+                deletedKeys: deletedKeys,
+                metadata: {
+                    totalRemarks: Object.keys(this.manager.remarks).length
+                }
+            };
+
+            await this.pushData(syncData, sha);
+            await this.clearLocalDeletedKeys();
+
+            this.config.lastSyncTime = new Date().toISOString();
+            await this.saveConfig(this.config);
+
+            this.setSyncStatus('connected', '推送成功');
+            this.manager.showToast('推送完成', 'success');
+
+        } catch (error) {
+            this.setSyncStatus('error', '推送失败');
+            this.manager.showToast('推送失败: ' + error.message, 'error');
+        } finally {
+            this.syncInProgress = false;
+        }
+    }
+
+    // 合并备注数据（基于时间戳，实现见 js/github-sync.js）
+    mergeRemarks(local, remote, deletedKeys = []) {
+        return GitHubSyncCore.mergeRemarks(local, remote, deletedKeys);
+    }
+
+    // 记录删除操作
+    async recordDeletion(key) {
+        return new Promise((resolve) => {
+            chrome.storage.local.get('githubSyncDeletedKeys', (result) => {
+                const deletedKeys = result.githubSyncDeletedKeys || [];
+                if (!deletedKeys.includes(key)) {
+                    deletedKeys.push(key);
+                }
+                chrome.storage.local.set({ githubSyncDeletedKeys: deletedKeys }, resolve);
+            });
+        });
+    }
+
+    // 获取本地删除记录
+    async getLocalDeletedKeys() {
+        return new Promise((resolve) => {
+            chrome.storage.local.get('githubSyncDeletedKeys', (result) => {
+                resolve({ deletedKeys: result.githubSyncDeletedKeys || [] });
+            });
+        });
+    }
+
+    // 清除本地删除记录
+    async clearLocalDeletedKeys() {
+        return new Promise((resolve) => {
+            chrome.storage.local.remove('githubSyncDeletedKeys', resolve);
+        });
+    }
+
+    // 更新同步状态 UI
+    setSyncStatus(status, text) {
+        const statusEl = document.getElementById('syncStatus');
+        if (!statusEl) return;
+
+        statusEl.className = `sync-status ${status}`;
+        const iconEl = statusEl.querySelector('.sync-status-icon');
+        const textEl = statusEl.querySelector('.sync-status-text');
+
+        if (iconEl) {
+            const icons = { connected: '🟢', syncing: '🔄', error: '🔴', '': '⚪' };
+            iconEl.textContent = icons[status] || '⚪';
+        }
+        if (textEl) {
+            textEl.textContent = text;
+        }
+    }
+
+    // 更新同步状态 UI（基于配置）
+    updateSyncStatusUI() {
+        if (!this.config?.enabled) {
+            this.setSyncStatus('', '未配置');
+        } else if (this.config.lastSyncTime) {
+            const lastSync = new Date(this.config.lastSyncTime);
+            this.setSyncStatus('connected', `已连接`);
+
+            const lastSyncEl = document.getElementById('lastSyncTime');
+            if (lastSyncEl) {
+                lastSyncEl.textContent = `上次同步: ${lastSync.toLocaleString('zh-CN')}`;
+            }
+        } else {
+            this.setSyncStatus('connected', '已配置，等待首次同步');
+        }
+    }
+
+    // 更新设置面板 UI
+    updateSyncSettingsUI() {
+        const enableCheckbox = document.getElementById('enableGithubSync');
+        const settingsDiv = document.getElementById('githubSyncSettings');
+        const tokenInput = document.getElementById('githubToken');
+        const repoInput = document.getElementById('githubRepo');
+        const branchInput = document.getElementById('githubBranch');
+        const timerCheckbox = document.getElementById('enableTimerSync');
+        const intervalGroup = document.getElementById('syncIntervalGroup');
+        const intervalSelect = document.getElementById('syncInterval');
+
+        if (this.config) {
+            if (enableCheckbox) enableCheckbox.checked = this.config.enabled || false;
+            if (settingsDiv) settingsDiv.style.display = this.config.enabled ? 'block' : 'none';
+            if (tokenInput) tokenInput.value = this.config.token || '';
+            if (repoInput) repoInput.value = this.config.repo || '';
+            if (branchInput) branchInput.value = this.config.branch || 'main';
+            if (timerCheckbox) timerCheckbox.checked = this.config.timerSync || false;
+            if (intervalGroup) intervalGroup.style.display = this.config.timerSync ? 'block' : 'none';
+            if (intervalSelect) intervalSelect.value = this.config.syncInterval || '30';
+        }
+    }
+}

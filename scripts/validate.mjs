@@ -11,7 +11,7 @@
  *
  * 用法：npm test
  */
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +29,10 @@ const abs = (p) => path.join(root, p);
 // 用 vm.Script 在进程内编译（只编译不执行）来检查语法，
 // 避免 execFileSync 在部分 Windows 环境下触发 spawn EBUSY。
 console.log('\n[1/5] JS 语法检查');
-const jsFiles = ['popup.js', 'background.js', 'content.js', 'marked.min.js', 'js/github-sync.js'];
+const jsFiles = [
+  'popup.js', 'background.js', 'content.js', 'marked.min.js',
+  ...(readdirSync(abs('js')).filter((f) => f.endsWith('.js')).map((f) => `js/${f}`).sort())
+];
 for (const f of jsFiles) {
   try {
     new vm.Script(readFileSync(abs(f), 'utf8'), { filename: f });
@@ -147,6 +150,14 @@ try {
     if (existsSync(abs(ref.split('?')[0]))) ok(ref);
     else bad(`引用的文件不存在: ${ref}`);
   }
+  // 反向检查：js/ 下的模块必须被 popup.html 引用，否则整个模块不会加载
+  const jsDir = abs('js');
+  if (existsSync(jsDir)) {
+    for (const mf of readdirSync(jsDir).filter((f) => f.endsWith('.js')).sort()) {
+      if (unique.includes(`js/${mf}`)) ok(`模块已被引用: js/${mf}`);
+      else bad(`模块未被 popup.html 引用（不会被加载）: js/${mf}`);
+    }
+  }
 } catch (e) {
   bad(`读取 popup.html 失败: ${e.message}`);
 }
@@ -163,6 +174,29 @@ try {
   }
 } catch (e) {
   bad(`读取 background.js 失败: ${e.message}`);
+}
+
+// ---------- 5c. popup.html 脚本加载顺序 ----------
+// js/ 下的模块以 Object.assign 挂载到 CloudflareManager.prototype，
+// 必须晚于 popup.js（类定义）加载，否则初始化时方法尚不存在。
+console.log('\n[5c] popup.html 脚本加载顺序');
+try {
+  const html = readFileSync(abs('popup.html'), 'utf8');
+  const srcs = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]);
+  const popupIdx = srcs.indexOf('popup.js');
+  if (popupIdx === -1) {
+    bad('popup.html 未引用 popup.js');
+  } else {
+    const jsModules = srcs.filter((s) => s.startsWith('js/') && s !== 'js/github-sync.js');
+    const badOrder = jsModules.filter((s) => srcs.indexOf(s) < popupIdx);
+    if (badOrder.length > 0) bad(`以下模块必须先于 popup.js 之后加载: ${badOrder.join(', ')}`);
+    else ok(`popup.js 之后的模块: ${jsModules.join(', ') || '（无）'}`);
+    const gsmIdx = srcs.indexOf('js/github-sync.js');
+    if (gsmIdx !== -1 && gsmIdx > popupIdx) bad('js/github-sync.js 必须在 popup.js 之前加载（popup 构造器引用 GitHubSyncManager）');
+    else if (gsmIdx !== -1) ok('js/github-sync.js 在 popup.js 之前');
+  }
+} catch (e) {
+  bad(`读取 popup.html 失败: ${e.message}`);
 }
 
 // ---------- 汇总 ----------
