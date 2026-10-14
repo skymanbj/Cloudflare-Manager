@@ -385,8 +385,13 @@ Object.assign(CloudflareManager.prototype, {
 
         /**
          * 绑定 Markdown 工具栏事件
+         * 幂等：重复调用只会生效一次，避免事件叠加导致
+         * 一次点击触发多次 toggle（预览状态互相抵消）。
          */
         bindMarkdownToolbarEvents() {
+            if (this._markdownToolbarBound) return;
+            this._markdownToolbarBound = true;
+
             const toolbar = document.getElementById('markdownToolbar');
             if (!toolbar) return;
     

@@ -152,7 +152,6 @@ class CloudflareManager {
 
         this.initTheme();
         this.configMarked();
-        this.bindMarkdownToolbarEvents();
         this.bindEvents();
         this.bindGithubSyncEvents();
 
