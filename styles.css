@@ -2749,7 +2749,13 @@ textarea::placeholder {
 }
 
 .markdown-body img {
-  max-width: 100%;
+  /* 限制预览图片尺寸：长截图/大图不再占满弹窗，超过则等比缩小并居中 */
+  max-width: min(100%, 520px);
+  max-height: 320px;
+  height: auto;
+  object-fit: contain;
+  display: block;
+  margin: 8px auto;
   box-sizing: content-box;
   background-color: var(--bg-card);
   border-radius: var(--radius-sm);

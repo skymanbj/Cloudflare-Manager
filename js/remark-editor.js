@@ -220,10 +220,21 @@ Object.assign(CloudflareManager.prototype, {
                 }
             } else {
                 // 如果 marked 没加载成功，执行超简易渲染
+                // 注意：escapeHtml 只转义 & < >，不转义引号，因此属性值必须额外转义引号，
+                // 并对 URL 做协议白名单校验，防止属性注入 / javascript: 等危险协议。
+                const escAttr = (v) => this.escapeHtml(v)
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+                const safeFallbackUrl = (u) => {
+                    const s = String(u == null ? '' : u).trim().replace(/[\r\n\t]/g, '');
+                    return /^(https?:\/\/|data:image\/)/i.test(s) ? s : '';
+                };
                 renderedContent = this.escapeHtml(remarkText)
                     .replace(/\n/g, '<br>')
-                    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>')
-                    .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" style="max-width:100%">');
+                    .replace(/\[([\s\S]*?)\]\(([\s\S]*?)\)/g, (m, t, u) =>
+                        `<a href="${escAttr(safeFallbackUrl(u))}" target="_blank" rel="noopener noreferrer">${t}</a>`)
+                    .replace(/!\[([\s\S]*?)\]\(([\s\S]*?)\)/g, (m, alt, u) =>
+                        `<img src="${escAttr(safeFallbackUrl(u))}" alt="${escAttr(alt)}" style="max-width:min(100%,520px); max-height:320px; object-fit:contain; display:block; margin:8px auto;">`);
             }
     
             return `
