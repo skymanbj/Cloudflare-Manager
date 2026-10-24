@@ -12,6 +12,7 @@
 -   **一站式运维**：
     -   **Workers**：查看项目状态、快速部署脚本、导出配置。
     -   **Pages**：监控构建进度、一键触发生产环境部署。
+    -   **Tunnel 管理面板**：快速打开已部署的 Cloudflare Tunnel 管理面板 Worker，集中管理 Tunnel 生命周期、自动 DNS CNAME 配置及 Telegram 上下线提醒。
 -   **增强型资源备注**：
     -   为域名、DNS 记录、Workers、Pages 添加详细备注。
     -   **Markdown 支持**：支持加粗、列表、链接、表格甚至本地图片上传。
@@ -37,14 +38,31 @@
 ### 2. 配置 Cloudflare 账户
 您需要一个具有相应权限的 API Token 才能使用：
 1. **获取 Token**：登录 Cloudflare 官网 -> My Profile -> API Tokens -> Create Token。
-2. **建议权限配置**：
+2. **建议权限配置**（扩展使用）：
     - `Zone - Zone:Read`
     - `Zone - DNS:Edit`
     - `Account - Workers Scripts:Edit`
     - `Account - Cloudflare Pages:Edit`
+
+    如果你使用 Tunnel 管理面板 Worker，该 Worker 本身还需要 `Account - Cloudflare Tunnel:Edit` 权限。
 3. **添加账户**：在扩展侧边栏点击“添加账户”，输入账户名称和 Token 即可。
 
-### 3. GitHub 数据同步（可选）
+### 3. 打开 Cloudflare Tunnel 管理面板（可选）
+
+如果你已经部署了 Tunnel 管理面板 Worker，可以在扩展中快速打开：
+
+1. 在扩展顶部切换到 **Tunnel** 标签页。
+2. 输入你的 Tunnel 面板域名（默认 `https://tunnel-panel.2024925.dpdns.org`），点击 **保存地址**。
+3. 点击 **打开面板**，即可在新标签页中登录并使用 Tunnel 管理面板。
+4. 首次使用需要在面板中配置环境变量：
+    - 在 **Settings → Variables and Secrets** 中配置：
+        - `CF_API_TOKEN`：具有 Tunnel 和 DNS 权限的 API Token。
+        - `CF_ACCOUNT_ID`：Cloudflare 账户 ID。
+        - `PASSWORD`：面板登录密码（至少 6 位）。
+    - 可选：绑定 D1 数据库 `TUNNEL_DB` 或 KV 命名空间 `TUNNEL_STATE`，用于持久化 Telegram 提醒配置。
+    - 可选：在 **Settings → Triggers** 中添加 Cron 触发器（如 `*/5 * * * *`），实现无人值守定时检查。
+
+### 4. GitHub 数据同步（可选）
 1. 创建一个私有 GitHub 仓库（建议）。
 2. 生成具有 `repo` 权限的 GitHub Personal Access Token。
      GitHub Token 生成步骤（修复权限不足问题）

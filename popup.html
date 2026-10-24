@@ -232,6 +232,13 @@
                     </svg>
                     Pages (<span id="tabPagesCount">0</span>)
                 </button>
+                <button class="tab" data-tab="tunnels">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 2a10 10 0 0 0-7.07 17.07A10 10 0 1 0 12 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    Tunnel
+                </button>
                 <button class="tab" data-tab="notes">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                         <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -360,6 +367,49 @@
             </div>
             <div id="pagesList" class="pages-list">
                 <div class="loading">加载中...</div>
+            </div>
+        </div>
+
+        <!-- Tunnel 管理面板区域 -->
+        <div id="tunnelsSection" class="tunnels-section" style="display: none;">
+            <div class="dns-header">
+                <h2>Cloudflare Tunnel 管理面板</h2>
+            </div>
+            <div class="tunnel-intro card">
+                <div class="tunnel-icon">🚇</div>
+                <div class="tunnel-intro-content">
+                    <h3>打开 Tunnel 管理面板</h3>
+                    <p>通过已部署的 Cloudflare Tunnel 管理面板 Worker，管理 Tunnel（Zero Trust）、自动配置 DNS CNAME，并接收 Telegram 上下线提醒。</p>
+                    <ul class="tunnel-features">
+                        <li>创建、编辑、删除 Tunnel 及路由</li>
+                        <li>自动创建/清理指向 Tunnel 的 DNS 记录</li>
+                        <li>多账号切换与权限隔离</li>
+                        <li>Telegram 状态变化提醒（需配置 Bot）</li>
+                        <li>支持 Cron 定时检查</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="tunnel-open card">
+                <h3>面板地址</h3>
+                <div class="form-group">
+                    <label for="tunnelPanelUrl">Tunnel 面板域名</label>
+                    <input type="url" id="tunnelPanelUrl" class="text-input" value="https://tunnel-panel.2024925.dpdns.org" placeholder="https://your-worker.your-subdomain.workers.dev">
+                    <small class="help-text">可修改为你的 Tunnel 面板 Worker 域名。</small>
+                </div>
+                <div class="form-actions">
+                    <button id="saveTunnelPanelUrlBtn" class="btn-secondary">💾 保存地址</button>
+                    <button id="openTunnelPanelBtn" class="btn-primary">🚀 打开面板</button>
+                </div>
+                <div id="tunnelOpenMessage" class="tunnel-open-message" style="display: none;"></div>
+            </div>
+            <div class="tunnel-config-hint card">
+                <h3>首次使用</h3>
+                <ol>
+                    <li>点击上方<strong>打开面板</strong>进入 Tunnel 管理界面。</li>
+                    <li>输入部署 Worker 时设置的 <code>PASSWORD</code> 登录。</li>
+                    <li>在面板中配置 <code>CF_API_TOKEN</code>、<code>CF_ACCOUNT_ID</code> 等环境变量（如尚未配置）。</li>
+                    <li>可选：绑定 D1 数据库 <code>TUNNEL_DB</code> 或 KV 命名空间 <code>TUNNEL_STATE</code> 以启用 Telegram 提醒持久化。</li>
+                </ol>
             </div>
         </div>
 

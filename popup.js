@@ -148,6 +148,7 @@ class CloudflareManager {
 
         await this.loadRemarks();
         await this.loadResourceCache(); // 启动时立即恢复缓存，实现秒开
+        await this.loadTunnelPanelUrl(); // 加载保存的 Tunnel 面板地址
         await this.githubSync.loadConfig();
 
         this.initTheme();
@@ -274,6 +275,16 @@ class CloudflareManager {
 
         // Pages search
         document.getElementById('pagesSearchInput').addEventListener('input', (e) => this.handlePagesSearch(e.target.value));
+
+        // Tunnel panel open / save URL
+        const openTunnelPanelBtn = document.getElementById('openTunnelPanelBtn');
+        if (openTunnelPanelBtn) {
+            openTunnelPanelBtn.addEventListener('click', () => this.openTunnelPanel());
+        }
+        const saveTunnelPanelUrlBtn = document.getElementById('saveTunnelPanelUrlBtn');
+        if (saveTunnelPanelUrlBtn) {
+            saveTunnelPanelUrlBtn.addEventListener('click', () => this.saveTunnelPanelUrl());
+        }
 
         // Remarks events (备注事件)
         const remarksSearchInput = document.getElementById('remarksSearchInput');
@@ -778,6 +789,76 @@ class CloudflareManager {
                 this.showToast(error.message, 'error');
             }
         }
+    }
+
+    // =====================================================
+    // Tunnel Panel
+    // =====================================================
+    getDefaultTunnelPanelUrl() {
+        return 'https://tunnel-panel.2024925.dpdns.org';
+    }
+
+    async loadTunnelPanelUrl() {
+        return new Promise((resolve) => {
+            chrome.storage.local.get(['tunnelPanelUrl'], (result) => {
+                const url = result.tunnelPanelUrl || this.getDefaultTunnelPanelUrl();
+                const input = document.getElementById('tunnelPanelUrl');
+                if (input) input.value = url;
+                resolve(url);
+            });
+        });
+    }
+
+    async saveTunnelPanelUrl() {
+        const input = document.getElementById('tunnelPanelUrl');
+        const messageBox = document.getElementById('tunnelOpenMessage');
+        let url = (input?.value || '').trim();
+
+        if (!url) {
+            url = this.getDefaultTunnelPanelUrl();
+            if (input) input.value = url;
+        }
+
+        try {
+            new URL(url);
+        } catch (e) {
+            this.showToast('请输入有效的 URL', 'error');
+            if (messageBox) {
+                messageBox.style.display = 'block';
+                messageBox.className = 'tunnel-open-message error';
+                messageBox.textContent = 'URL 格式不正确';
+            }
+            return;
+        }
+
+        await new Promise((resolve) => {
+            chrome.storage.local.set({ tunnelPanelUrl: url }, resolve);
+        });
+
+        this.showToast('面板地址已保存', 'success');
+        if (messageBox) {
+            messageBox.style.display = 'block';
+            messageBox.className = 'tunnel-open-message success';
+            messageBox.textContent = '地址已保存';
+        }
+    }
+
+    async openTunnelPanel() {
+        const input = document.getElementById('tunnelPanelUrl');
+        let url = (input?.value || '').trim();
+
+        if (!url) {
+            url = await this.loadTunnelPanelUrl();
+        }
+
+        try {
+            new URL(url);
+        } catch (e) {
+            this.showToast('请输入有效的面板 URL', 'error');
+            return;
+        }
+
+        chrome.tabs.create({ url });
     }
 
 }

@@ -22,6 +22,7 @@ Object.assign(CloudflareManager.prototype, {
             document.getElementById('dnsSection').style.display = tab === 'dns' ? 'block' : 'none';
             document.getElementById('workersSection').style.display = tab === 'workers' ? 'block' : 'none';
             document.getElementById('pagesSection').style.display = tab === 'pages' ? 'block' : 'none';
+            document.getElementById('tunnelsSection').style.display = tab === 'tunnels' ? 'block' : 'none';
             document.getElementById('notesSection').style.display = tab === 'notes' ? 'block' : 'none';
     
             // Update stats visibility
