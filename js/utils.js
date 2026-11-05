@@ -8,11 +8,40 @@
 
 Object.assign(CloudflareManager.prototype, {
         /**
-         * 初始化主题
+         * 初始化主题：从 chrome.storage 读取用户偏好，默认暗色
          */
         initTheme() {
-            // Currently using CSS variables for theme, could be extended for toggle
-            // Checks for system preference if needed in future
+            const apply = (theme) => this.applyTheme(theme === 'light' ? 'light' : 'dark');
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                try {
+                    chrome.storage.local.get('theme', (result) => apply(result && result.theme));
+                } catch (e) {
+                    apply('dark');
+                }
+            } else {
+                apply('dark');
+            }
+        }
+,
+
+        /**
+         * 应用主题到 <html data-theme>
+         */
+        applyTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+        }
+,
+
+        /**
+         * 切换亮色 / 暗色，并持久化偏好
+         */
+        toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+            const next = current === 'light' ? 'dark' : 'light';
+            this.applyTheme(next);
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                try { chrome.storage.local.set({ theme: next }); } catch (e) { /* 忽略持久化失败 */ }
+            }
         }
 ,
 

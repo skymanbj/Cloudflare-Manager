@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cloudflare Manager</title>
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <div class="container">
         <!-- 头部 -->
@@ -13,27 +15,46 @@
             <div class="logo">
                 <button id="menuBtn" class="menu-btn" title="菜单">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <path d="M3 12h18M3 6h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M3 12h18M3 6h18M3 18h18" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" />
                     </svg>
                 </button>
-                <h1>Cloudflare Manager <span id="headerAccountName" class="header-account-badge" style="display: none;"></span></h1>
+                <h1>Cloudflare Manager <span id="headerAccountName" class="header-account-badge"
+                        style="display: none;"></span></h1>
             </div>
             <div class="header-actions">
                 <button id="exportBtn" class="icon-btn" title="导出当前账户数据">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
                 </button>
                 <button id="exportAllBtn" class="icon-btn" title="导出所有账户数据">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                        <path d="M8 3v8m0 0L5.5 8.5M8 11l2.5-2.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M16 3v8m0 0L13.5 8.5M16 11l2.5-2.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M8 3v8m0 0L5.5 8.5M8 11l2.5-2.5" stroke="currentColor" stroke-width="1.9"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M16 3v8m0 0L13.5 8.5M16 11l2.5-2.5" stroke="currentColor" stroke-width="1.9"
+                            stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.9"
+                            stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
                 </button>
                 <button id="refreshBtn" class="icon-btn" title="刷新">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </button>
+                <button id="themeToggleBtn" class="icon-btn theme-toggle-btn" title="切换亮色 / 暗色主题">
+                    <svg class="icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="2" />
+                        <path
+                            d="M12 2v2.2M12 19.8V22M2 12h2.2M19.8 12H22M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M19.1 4.9l-1.6 1.6M6.5 17.5l-1.6 1.6"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                    <svg class="icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke="currentColor" stroke-width="2"
+                            stroke-linejoin="round" />
                     </svg>
                 </button>
             </div>
@@ -54,7 +75,7 @@
                         <option value="">请选择账户</option>
                     </select>
                 </div>
-                
+
                 <!-- 添加/编辑账户 -->
                 <div class="sidebar-section">
                     <h3>添加账户</h3>
@@ -72,18 +93,20 @@
                         <button id="deleteAccountBtn" class="btn-danger btn-block" style="display: none;">删除账户</button>
                     </div>
                 </div>
-                
+
                 <!-- 已保存账户列表 -->
                 <div class="sidebar-section">
                     <h3>已保存账户</h3>
                     <div id="accountList" class="account-list"></div>
                     <div class="sidebar-actions" style="margin-top: 10px; display: flex; gap: 8px;">
-                        <button id="exportAccountsBtn" class="btn-secondary btn-sm" style="flex: 1;" title="导出所有账户配置">📤 导出账户</button>
-                        <button id="importAccountsBtn" class="btn-secondary btn-sm" style="flex: 1;" title="导入账户配置">📥 导入账户</button>
+                        <button id="exportAccountsBtn" class="btn-secondary btn-sm" style="flex: 1;" title="导出所有账户配置">📤
+                            导出账户</button>
+                        <button id="importAccountsBtn" class="btn-secondary btn-sm" style="flex: 1;" title="导入账户配置">📥
+                            导入账户</button>
                     </div>
                     <input type="file" id="importAccountsInput" accept=".json" style="display: none;">
                 </div>
-                
+
                 <!-- GitHub 同步设置 -->
                 <div class="sidebar-section">
                     <h3>📦 GitHub 同步</h3>
@@ -111,7 +134,7 @@
                             <label for="githubBranch">分支</label>
                             <input type="text" id="githubBranch" class="text-input" value="main">
                         </div>
-                        
+
                         <!-- 定时同步设置 -->
                         <div class="form-group">
                             <label class="checkbox-label">
@@ -129,7 +152,7 @@
                             </select>
                         </div>
                         <div class="sync-last-time" id="lastSyncTime">上次同步: 从未</div>
-                        
+
                         <div class="form-actions sync-actions">
                             <button id="saveGithubConfigBtn" class="btn-primary btn-block">💾 保存配置</button>
                             <button id="syncNowBtn" class="btn-secondary btn-block">🔄 立即同步</button>
@@ -146,7 +169,8 @@
             <div class="welcome-content">
                 <div class="welcome-icon">
                     <svg width="80" height="80" viewBox="0 0 24 24" fill="none">
-                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor"
+                            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
                 </div>
                 <h2 class="welcome-title">欢迎使用 Cloudflare Manager</h2>
@@ -178,8 +202,8 @@
                 </div>
                 <button id="welcomeAddAccountBtn" class="btn-primary btn-large">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-                        <path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" />
+                        <path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                     </svg>
                     添加 Cloudflare 账户
                 </button>
@@ -214,34 +238,50 @@
         <div id="tabsSection" class="tabs-section" style="display: none;">
             <div class="tabs">
                 <button class="tab active" data-tab="dns">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <g stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="9" />
+                            <path d="M3.4 8.2h17.2" />
+                            <path d="M3.4 15.8h17.2" />
+                            <path d="M12 3v18" />
+                            <path d="M7.6 3.8c-1.7 2.3-2.6 5.1-2.6 8.2s.9 5.9 2.6 8.2" />
+                            <path d="M16.4 3.8c1.7 2.3 2.6 5.1 2.6 8.2s-.9 5.9-2.6 8.2" />
+                        </g>
                     </svg>
                     域名和DNS (<span id="tabZoneCount">0</span>/<span id="tabDnsCount">0</span>)
                 </button>
                 <button class="tab" data-tab="workers">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <g stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9.8 2 L3 12 L9.8 22 L17.1 12 Z" />
+                            <path d="M13.7 2 L21 12 L13.7 22" />
+                        </g>
                     </svg>
                     Workers (<span id="tabWorkersCount">0</span>)
                 </button>
                 <button class="tab" data-tab="pages">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <rect x="4" y="4" width="16" height="16" rx="1" stroke="currentColor" stroke-width="2.1"
+                            stroke-linejoin="round" />
+                        <path d="M13.5 1 L6.5 12.2 H11.2 L9.5 23 L17.8 10.8 H13.2 Z" fill="currentColor" />
                     </svg>
                     Pages (<span id="tabPagesCount">0</span>)
                 </button>
                 <button class="tab" data-tab="tunnels">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                        <path d="M12 2a10 10 0 0 0-7.07 17.07A10 10 0 1 0 12 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <g stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 21V11a9 9 0 0 1 18 0v10" />
+                            <path d="M8.6 19.6v1.6M15.4 19.6v1.6" />
+                        </g>
+                        <path fill="currentColor" fill-rule="evenodd"
+                            d="M9.5 7h5A2.5 2.5 0 0 1 17 9.5v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8A2.5 2.5 0 0 1 9.5 7Z M8.6 9.9a0.4 0.4 0 0 1 0.4-0.4h6a0.4 0.4 0 0 1 0.4 0.4v4.2a0.4 0.4 0 0 1-0.4 0.4H9a0.4 0.4 0 0 1-0.4-0.4Z M9.2 16.3h1.6v1.6H9.2Z M13.2 16.3h1.6v1.6h-1.6Z" />
                     </svg>
-                    Tunnel
+                    Tunnel (<span id="tabTunnelsCount">0</span>)
                 </button>
                 <button class="tab" data-tab="notes">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                        <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
                     笔记 (<span id="tabNotesCount">0</span>)
                 </button>
@@ -303,7 +343,8 @@
                 <div class="form-row" id="recordPriorityRow" style="display: none;">
                     <div class="form-group">
                         <label for="recordPriority">优先级 (MX/SRV)</label>
-                        <input type="number" id="recordPriority" class="text-input" placeholder="例如: 10" min="0" max="65535">
+                        <input type="number" id="recordPriority" class="text-input" placeholder="例如: 10" min="0"
+                            max="65535">
                     </div>
                 </div>
                 <div class="form-row">
@@ -373,43 +414,75 @@
         <!-- Tunnel 管理面板区域 -->
         <div id="tunnelsSection" class="tunnels-section" style="display: none;">
             <div class="dns-header">
-                <h2>Cloudflare Tunnel 管理面板</h2>
-            </div>
-            <div class="tunnel-intro card">
-                <div class="tunnel-icon">🚇</div>
-                <div class="tunnel-intro-content">
-                    <h3>打开 Tunnel 管理面板</h3>
-                    <p>通过已部署的 Cloudflare Tunnel 管理面板 Worker，管理 Tunnel（Zero Trust）、自动配置 DNS CNAME，并接收 Telegram 上下线提醒。</p>
-                    <ul class="tunnel-features">
-                        <li>创建、编辑、删除 Tunnel 及路由</li>
-                        <li>自动创建/清理指向 Tunnel 的 DNS 记录</li>
-                        <li>多账号切换与权限隔离</li>
-                        <li>Telegram 状态变化提醒（需配置 Bot）</li>
-                        <li>支持 Cron 定时检查</li>
-                    </ul>
+                <h2>Cloudflare Tunnel</h2>
+                <div class="dns-header-actions">
+                    <div class="search-box">
+                        <input type="text" id="tunnelsSearchInput" class="search-input" placeholder="搜索 Tunnel...">
+                    </div>
+                    <button id="openTunnelPanelBtn" class="btn-primary btn-sm" title="打开 Tunnel 管理面板">🚀 打开面板</button>
+                    <button id="toggleTunnelSettingsBtn" class="btn-secondary btn-sm" title="展开/收起面板入口与设置">⚙️ 面板入口</button>
                 </div>
             </div>
-            <div class="tunnel-open card">
-                <h3>面板地址</h3>
-                <div class="form-group">
-                    <label for="tunnelPanelUrl">Tunnel 面板域名</label>
-                    <input type="url" id="tunnelPanelUrl" class="text-input" value="https://tunnel-panel.2024925.dpdns.org" placeholder="https://your-worker.your-subdomain.workers.dev">
-                    <small class="help-text">可修改为你的 Tunnel 面板 Worker 域名。</small>
+
+            <!-- 面板入口与设置（可折叠，与 Tunnel 列表分离，避免混杂） -->
+            <div id="tunnelSettingsPanel" class="tunnel-settings-panel" style="display: none;">
+                <div class="tunnel-intro card">
+                    <div class="tunnel-icon">
+                        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <g stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 21V11a9 9 0 0 1 18 0v10" />
+                                <path d="M8.6 19.6v1.6M15.4 19.6v1.6" />
+                            </g>
+                            <path fill="currentColor" fill-rule="evenodd"
+                                d="M9.5 7h5A2.5 2.5 0 0 1 17 9.5v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8A2.5 2.5 0 0 1 9.5 7Z M8.6 9.9a0.4 0.4 0 0 1 0.4-0.4h6a0.4 0.4 0 0 1 0.4 0.4v4.2a0.4 0.4 0 0 1-0.4 0.4H9a0.4 0.4 0 0 1-0.4-0.4Z M9.2 16.3h1.6v1.6H9.2Z M13.2 16.3h1.6v1.6h-1.6Z" />
+                        </svg>
+                    </div>
+                    <div class="tunnel-intro-content">
+                        <h3>打开 Tunnel 管理面板</h3>
+                        <p>通过已部署的 Cloudflare Tunnel 管理面板 Worker，管理 Tunnel（Zero Trust）、自动配置 DNS CNAME，并接收 Telegram 上下线提醒。</p>
+                        <ul class="tunnel-features">
+                            <li>创建、编辑、删除 Tunnel 及路由</li>
+                            <li>自动创建/清理指向 Tunnel 的 DNS 记录</li>
+                            <li>多账号切换与权限隔离</li>
+                            <li>Telegram 状态变化提醒（需配置 Bot）</li>
+                            <li>支持 Cron 定时检查</li>
+                        </ul>
+                    </div>
                 </div>
-                <div class="form-actions">
-                    <button id="saveTunnelPanelUrlBtn" class="btn-secondary">💾 保存地址</button>
-                    <button id="openTunnelPanelBtn" class="btn-primary">🚀 打开面板</button>
+                <div class="tunnel-open card">
+                    <h3>面板地址</h3>
+                    <div class="form-group">
+                        <label for="tunnelPanelUrl">Tunnel 面板域名</label>
+                        <input type="url" id="tunnelPanelUrl" class="text-input"
+                            value="https://tunnel-panel.2024925.dpdns.org"
+                            placeholder="https://your-worker.your-subdomain.workers.dev">
+                        <small class="help-text">可修改为你的 Tunnel 面板 Worker 域名。</small>
+                    </div>
+                    <!-- 新增 Tunnel API Token 输入框 -->
+                    <div class="form-group">
+                        <label for="tunnelApiToken">Tunnel API Token</label>
+                        <input type="text" id="tunnelApiToken" class="text-input" placeholder="输入 Tunnel API Token">
+                        <small id="tunnelTokenAccountHint" class="help-text"></small>
+                    </div>
+                    <div class="form-actions">
+                        <button id="saveTunnelPanelUrlBtn" class="btn-secondary">💾 保存地址</button>
+                        <button id="saveTunnelTokenBtn" class="btn-secondary" type="button">💾 保存 Token</button>
+                    </div>
+                    <div id="tunnelOpenMessage" class="tunnel-open-message" style="display: none;"></div>
                 </div>
-                <div id="tunnelOpenMessage" class="tunnel-open-message" style="display: none;"></div>
+                <div class="tunnel-config-hint card">
+                    <h3>首次使用</h3>
+                    <ol>
+                        <li>点击上方<strong>打开面板</strong>进入 Tunnel 管理界面。</li>
+                        <li>输入部署 Worker 时设置的 <code>PASSWORD</code> 登录。</li>
+                        <li>在面板中配置 <code>CF_API_TOKEN</code>、<code>CF_ACCOUNT_ID</code> 等环境变量（如尚未配置）。</li>
+                        <li>可选：绑定 D1 数据库 <code>TUNNEL_DB</code> 或 KV 命名空间 <code>TUNNEL_STATE</code> 以启用 Telegram 提醒持久化。</li>
+                    </ol>
+                </div>
             </div>
-            <div class="tunnel-config-hint card">
-                <h3>首次使用</h3>
-                <ol>
-                    <li>点击上方<strong>打开面板</strong>进入 Tunnel 管理界面。</li>
-                    <li>输入部署 Worker 时设置的 <code>PASSWORD</code> 登录。</li>
-                    <li>在面板中配置 <code>CF_API_TOKEN</code>、<code>CF_ACCOUNT_ID</code> 等环境变量（如尚未配置）。</li>
-                    <li>可选：绑定 D1 数据库 <code>TUNNEL_DB</code> 或 KV 命名空间 <code>TUNNEL_STATE</code> 以启用 Telegram 提醒持久化。</li>
-                </ol>
+
+            <div id="tunnelsList" class="tunnels-list">
+                <div class="loading">加载中...</div>
             </div>
         </div>
 
@@ -480,19 +553,25 @@
                         <div class="remark-content-header">
                             <label for="remarkContent">备注内容</label>
                             <div class="markdown-toolbar" id="markdownToolbar">
-                                <button type="button" class="toolbar-btn" data-action="bold" title="加粗 (Ctrl+B)">B</button>
-                                <button type="button" class="toolbar-btn" data-action="italic" title="斜体 (Ctrl+I)">I</button>
+                                <button type="button" class="toolbar-btn" data-action="bold"
+                                    title="加粗 (Ctrl+B)">B</button>
+                                <button type="button" class="toolbar-btn" data-action="italic"
+                                    title="斜体 (Ctrl+I)">I</button>
                                 <button type="button" class="toolbar-btn" data-action="list" title="无序列表">-</button>
                                 <button type="button" class="toolbar-btn" data-action="link" title="链接">🔗</button>
-                                <button type="button" class="toolbar-btn" data-action="image-url" title="图片链接">🖼️</button>
-                                <button type="button" class="toolbar-btn" data-action="image-local" title="上传本地图片">📁</button>
+                                <button type="button" class="toolbar-btn" data-action="image-url"
+                                    title="图片链接">🖼️</button>
+                                <button type="button" class="toolbar-btn" data-action="image-local"
+                                    title="上传本地图片">📁</button>
                                 <button type="button" class="toolbar-btn" data-action="table" title="插入表格">📊</button>
                                 <div class="toolbar-divider"></div>
-                                <button type="button" class="toolbar-btn" data-action="preview" id="togglePreviewBtn" title="预览">👁️ 预览</button>
+                                <button type="button" class="toolbar-btn" data-action="preview" id="togglePreviewBtn"
+                                    title="预览">👁️ 预览</button>
                             </div>
                         </div>
                         <div class="remark-editor-wrapper">
-                            <textarea id="remarkContent" class="text-input" rows="8" placeholder="支持 Markdown 语法..."></textarea>
+                            <textarea id="remarkContent" class="text-input" rows="8"
+                                placeholder="支持 Markdown 语法..."></textarea>
                             <div id="remarkPreview" class="markdown-body preview-area" style="display: none;"></div>
                         </div>
                         <input type="file" id="localImageInput" accept="image/*" style="display: none;">
@@ -501,7 +580,7 @@
                         <label for="projectAlias">项目别名 (仅本地显示)</label>
                         <input type="text" id="projectAlias" class="text-input" placeholder="例如: 博客前端, 支付接口">
                     </div>
-                    
+
                     <div id="cloudflareRenameSection" class="cloudflare-rename-section" style="display: none;">
                         <p class="rename-hint">💡 提示：点击列表中的项目名称可直接前往 Cloudflare 官网重命名资源。更名后请手动修改上方的“项目别名”以保持显示一致。</p>
                     </div>
@@ -546,11 +625,16 @@
                 <div id="workersDeployOptions" style="display: none;">
                     <div class="form-group">
                         <label>脚本内容</label>
-                        <textarea id="workerScriptContent" class="text-input" placeholder="在此粘贴 Worker 脚本内容..."></textarea>
+                        <textarea id="workerScriptContent" class="text-input"
+                            placeholder="在此粘贴 Worker 脚本内容..."></textarea>
                     </div>
                     <div class="form-row">
                         <button class="btn btn-secondary btn-sm" id="uploadScriptBtn">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"
+                                    stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round" />
+                            </svg>
                             上传 .js 文件
                         </button>
                     </div>
@@ -572,4 +656,5 @@
     <script src="js/export.js"></script>
     <script src="js/utils.js"></script>
 </body>
+
 </html>

@@ -20,6 +20,7 @@ class CloudflareManager {
         this.allRecords = [];
         this.workers = [];
         this.pages = [];
+        this.tunnels = [];
         this.accountId = null;
         this.currentTab = 'dns';
         this.editingRecordId = null;
@@ -29,12 +30,17 @@ class CloudflareManager {
         this.workersSearchQuery = '';
         this.pagesSearchQuery = '';
         this.collapsedZones = new Set(); // 存储折叠的域名
-        this.collapsedRemarkGroups = new Set(); // 存储折叠的备注分组
+        this.collapsedRemarkGroups = new Set(); // 存储折叠的备注分组（兼容旧逻辑）
+        this.collapsedAccountGroups = new Set(); // 存储折叠的账号分组（workers / pages / notes 共用，key 形如 "workers:acctId"）
 
         // 加载状态位
         this.isLoadingZones = false;
         this.isLoadingWorkers = false;
         this.isLoadingPages = false;
+        this.isLoadingTunnels = false;
+        this.tunnelsSearchQuery = '';
+        // 按账号保存的 Tunnel API Token：{ [accountId]: token }
+        this.tunnelApiTokenByAccount = {};
 
         // 资源备注相关
         this.remarks = {}; // { 'type:id': { content, tags, updatedAt } }
@@ -95,6 +101,14 @@ class CloudflareManager {
                         return dateB - dateA;
                     });
                 }
+                if (cache.tunnels) {
+                    this.tunnels = cache.tunnels;
+                    this.tunnels.sort((a, b) => {
+                        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+                        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+                        return dateB - dateA;
+                    });
+                }
                 if (cache.allRecords) this.allRecords = cache.allRecords;
                 console.log(`[Cache] Loaded resource cache for account: ${this.currentAccount?.name}`);
                 resolve();
@@ -110,6 +124,7 @@ class CloudflareManager {
                 zones: this.zones,
                 workers: this.workers,
                 pages: this.pages,
+                tunnels: this.tunnels,
                 allRecords: this.allRecords,
                 timestamp: Date.now()
             };
@@ -146,6 +161,16 @@ class CloudflareManager {
             });
         }
 
+        // Load Tunnel API Token (全局 + 按账号) and populate input field
+        await new Promise((resolve) => {
+            chrome.storage.local.get(['tunnelApiToken', 'tunnelApiTokenByAccount'], (result) => {
+                this.tunnelApiToken = result.tunnelApiToken || '';
+                this.tunnelApiTokenByAccount = result.tunnelApiTokenByAccount || {};
+                this.updateTunnelTokenInput();
+                resolve();
+            });
+        });
+
         await this.loadRemarks();
         await this.loadResourceCache(); // 启动时立即恢复缓存，实现秒开
         await this.loadTunnelPanelUrl(); // 加载保存的 Tunnel 面板地址
@@ -158,7 +183,7 @@ class CloudflareManager {
 
         // Auto-select account if none selected but available
         if (!this.currentAccount && this.accounts.length > 0) {
-            this.switchAccount(this.accounts[0].id);
+            this.switchAccount(this.getOrderedAccounts()[0].id);
         } else {
             this.updateUI();
         }
@@ -189,6 +214,7 @@ class CloudflareManager {
                 this.isLoadingZones = false;
                 this.isLoadingWorkers = false;
                 this.isLoadingPages = false;
+                this.isLoadingTunnels = false;
                 resolve();
             });
         });
@@ -207,6 +233,8 @@ class CloudflareManager {
         document.getElementById('refreshBtn').addEventListener('click', () => this.refresh());
         document.getElementById('exportBtn').addEventListener('click', () => this.exportData());
         document.getElementById('exportAllBtn')?.addEventListener('click', () => this.exportAllAccountsData());
+        const themeToggleBtn = document.getElementById('themeToggleBtn');
+        if (themeToggleBtn) themeToggleBtn.addEventListener('click', () => this.toggleTheme());
 
         // Welcome section
         document.getElementById('welcomeAddAccountBtn').addEventListener('click', () => this.openSidebar());
@@ -276,14 +304,66 @@ class CloudflareManager {
         // Pages search
         document.getElementById('pagesSearchInput').addEventListener('input', (e) => this.handlePagesSearch(e.target.value));
 
+        // Tunnels search
+        const tunnelsSearchInput = document.getElementById('tunnelsSearchInput');
+        if (tunnelsSearchInput) {
+            tunnelsSearchInput.addEventListener('input', (e) => this.handleTunnelsSearch(e.target.value));
+        }
+
         // Tunnel panel open / save URL
         const openTunnelPanelBtn = document.getElementById('openTunnelPanelBtn');
         if (openTunnelPanelBtn) {
             openTunnelPanelBtn.addEventListener('click', () => this.openTunnelPanel());
         }
+        // Tunnel panel entry/settings toggle (折叠/展开面板入口与设置)
+        const toggleTunnelSettingsBtn = document.getElementById('toggleTunnelSettingsBtn');
+        if (toggleTunnelSettingsBtn) {
+            toggleTunnelSettingsBtn.addEventListener('click', () => {
+                const panel = document.getElementById('tunnelSettingsPanel');
+                if (!panel) return;
+                const isHidden = panel.style.display === 'none' || panel.style.display === '';
+                panel.style.display = isHidden ? 'flex' : 'none';
+                toggleTunnelSettingsBtn.classList.toggle('active', isHidden);
+            });
+        }
         const saveTunnelPanelUrlBtn = document.getElementById('saveTunnelPanelUrlBtn');
         if (saveTunnelPanelUrlBtn) {
             saveTunnelPanelUrlBtn.addEventListener('click', () => this.saveTunnelPanelUrl());
+        }
+        // Save Tunnel API Token button
+        const saveTunnelTokenBtn = document.getElementById('saveTunnelTokenBtn');
+        if (saveTunnelTokenBtn) {
+            saveTunnelTokenBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const tokenInput = document.getElementById('tunnelApiToken');
+                const token = tokenInput?.value?.trim() || '';
+                // Immediate feedback to confirm click
+                this.showToast('正在保存 Tunnel API Token...', 'info');
+                console.log('Saving Tunnel API Token:', token);
+                // 按账号保存 Tunnel Token：有选中账户则存入该账号，否则作为全局兜底
+                const accountId = this.currentAccount?.id;
+                if (accountId) {
+                    this.tunnelApiTokenByAccount[accountId] = token;
+                } else {
+                    this.tunnelApiToken = token;
+                }
+                chrome.storage.local.set({
+                    tunnelApiToken: this.tunnelApiToken,
+                    tunnelApiTokenByAccount: this.tunnelApiTokenByAccount
+                }, () => {
+                    // Update input field to reflect saved token
+                    const tokenInput = document.getElementById('tunnelApiToken');
+                    if (tokenInput) tokenInput.value = token;
+                    this.showToast(
+                        accountId ? `Tunnel API Token 已保存到账户「${this.currentAccount?.name || accountId}」` : 'Tunnel API Token 已保存（全局）',
+                        'success'
+                    );
+                    // 若当前在 Tunnel 标签，重新加载隧道数据以使用新 token
+                    if (this.currentTab === 'tunnels') {
+                        this.refreshCurrentView();
+                    }
+                });
+            });
         }
 
         // Remarks events (备注事件)
@@ -543,7 +623,7 @@ class CloudflareManager {
             return;
         }
 
-        listEl.innerHTML = this.accounts.map(account => `
+        listEl.innerHTML = this.getOrderedAccounts().map(account => `
             <div class="account-list-item ${this.currentAccount?.id === account.id ? 'active' : ''}" data-id="${account.id}">
                 <span class="account-list-item-name">${this.escapeHtml(account.name)}</span>
                 <div class="account-list-item-actions">
@@ -583,7 +663,7 @@ class CloudflareManager {
         if (confirm('确定要删除此账户吗？')) {
             this.accounts = this.accounts.filter(a => a.id !== accountId);
             if (this.currentAccount?.id === accountId) {
-                this.currentAccount = this.accounts[0] || null;
+                this.currentAccount = this.getOrderedAccounts()[0] || null;
             }
             this.saveAccounts();
             this.renderAccountList();
@@ -612,6 +692,7 @@ class CloudflareManager {
 
         // 瞬间更新名称（不等待获取颜色 ID）
         this.updateHeaderAccountUI();
+        this.updateTunnelTokenInput();
 
         // 极速保存并进入并行加载流程
         await this.saveAccounts();
@@ -629,9 +710,11 @@ class CloudflareManager {
             return;
         }
 
-        const currentIndex = this.accounts.findIndex(a => a.id === this.currentAccount?.id);
-        const nextIndex = (currentIndex + 1) % this.accounts.length;
-        const nextAccount = this.accounts[nextIndex];
+        // 按侧边栏显示顺序切换（置顶账号排在最前）
+        const orderedAccounts = this.getOrderedAccounts();
+        const currentIndex = orderedAccounts.findIndex(a => a.id === this.currentAccount?.id);
+        const nextIndex = (currentIndex + 1) % orderedAccounts.length;
+        const nextAccount = orderedAccounts[nextIndex];
 
         if (nextAccount) {
             this.showToast(`正在切换到: ${nextAccount.name}...`, 'info');
@@ -794,6 +877,23 @@ class CloudflareManager {
     // =====================================================
     // Tunnel Panel
     // =====================================================
+    /**
+     * 刷新 Tunnel API Token 输入框：优先显示当前账户保存的 Token，否则回退到全局 Token
+     */
+    updateTunnelTokenInput() {
+        const tokenInput = document.getElementById('tunnelApiToken');
+        if (!tokenInput) return;
+        const accountId = this.currentAccount?.id;
+        const perAccount = accountId ? (this.tunnelApiTokenByAccount[accountId] || '') : '';
+        tokenInput.value = perAccount || this.tunnelApiToken || '';
+        const hint = document.getElementById('tunnelTokenAccountHint');
+        if (hint) {
+            hint.textContent = this.currentAccount
+                ? `将保存到账户「${this.currentAccount.name}」；留空则 Tunnel 使用该账户自身 Token。`
+                : '当前未选择账户，将保存为全局 Token。';
+        }
+    }
+
     getDefaultTunnelPanelUrl() {
         return 'https://tunnel-panel.2024925.dpdns.org';
     }
