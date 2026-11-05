@@ -520,17 +520,15 @@ Object.assign(CloudflareManager.prototype, {
     ,
 
     /**
-     * 解析某个 Cloudflare 账户可用的 Tunnel 凭据候选（按优先级排列）。
+     * 解析当前账号可用的 Tunnel 凭据候选（按优先级排列）。
      *
-     * 关键原则：当前选中账号自己的 Cloudflare 账户，只使用它自己的凭据，
-     * 不借用其它本地账号的 Token —— 否则会用别的凭据去请求当前账号的账户，
-     * 请求被 403 拒绝后被静默忽略，表现为「当前账号的 Tunnel 看不到」。
+     * 关键原则：严格只使用当前选中账号自己的凭据，绝不跨账号借用其它账号的 Token，
+     * 避免在当前账号下混入其它账号的隧道。
      *
      * 优先级：
      * 1. 当前账号单独保存的 Tunnel Token（tunnelApiTokenByAccount[本地账户id]）
      * 2. 当前账号自身的 API Token
-     * 3. 该 CF 账户明确归属于另一个本地账号时，才借用那个账号的凭据
-     * 4. 全局 Tunnel Token（兼容旧配置）
+     * 3. 全局 Tunnel Token（兼容旧配置）
      */
     getTunnelTokenCandidates(account) {
         const current = this.currentAccount;
@@ -544,16 +542,7 @@ Object.assign(CloudflareManager.prototype, {
         push(current?.id ? this.tunnelApiTokenByAccount?.[current.id] : '');
         push(current?.token);
 
-        // 3：只有当这个 CF 账户不属于当前账号时，才允许借用归属账号的凭据
-        if (!this.isCurrentAccountCfAccount(account)) {
-            const stored = this.findStoredAccount(account?.id, account?.name);
-            if (stored && stored.id !== current?.id) {
-                push(this.tunnelApiTokenByAccount?.[stored.id]);
-                push(stored.token);
-            }
-        }
-
-        // 4：全局 Tunnel Token（兼容旧配置）
+        // 3：全局 Tunnel Token（兼容旧配置）
         push(this.tunnelApiToken);
 
         return candidates;
@@ -604,7 +593,15 @@ Object.assign(CloudflareManager.prototype, {
                 }
             } catch (e) { }
 
-            const allAccounts = Array.from(uniqueAccounts.values());
+            // 排除明确归属于其他本地账号的 CF 账户（防止跨账号串显隧道）
+            const allAccounts = Array.from(uniqueAccounts.values()).filter(acc => {
+                if (this.isCurrentAccountCfAccount(acc)) return true;
+                const stored = this.findStoredAccount(acc.id, acc.name);
+                if (stored && stored.id !== this.currentAccount?.id) {
+                    return false;
+                }
+                return true;
+            });
 
             if (allAccounts.length === 0) {
                 throw new Error('无法发现任何 Cloudflare 账户。请检查 API Token 权限。');

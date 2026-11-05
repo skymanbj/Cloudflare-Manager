@@ -3394,12 +3394,6 @@ textarea::placeholder {
   grid-column: 1 / -1;
 }
 
-/* 账号分组在 Tunnel 列表中也跨整行显示 */
-.tunnels-list>.account-group {
-  grid-column: 1 / -1;
-  min-width: 0;
-}
-
 /* Tunnel 读取失败提示：区分「读不到」与「没有隧道」 */
 .tunnel-load-warning {
   grid-column: 1 / -1;

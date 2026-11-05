@@ -1102,19 +1102,7 @@ Object.assign(CloudflareManager.prototype, {
             list.appendChild(searchInfo);
         }
 
-        // 按 Cloudflare 账户分组展示（与 Workers / Pages / 笔记保持一致）
-        const tunnelGroups = this.groupByAccount(filteredTunnels);
-        const tunnelGroupContainers = new Map();
-        tunnelGroups.forEach(group => {
-            const { groupDiv, itemsDiv } = this.createAccountGroup(
-                group,
-                'tunnels',
-                `${group.items.length} 个 Tunnel`
-            );
-            list.appendChild(groupDiv);
-            tunnelGroupContainers.set(group.key, itemsDiv);
-        });
-
+        // Tunnel 列表平铺展示，不按账号分组（不显示账户名）
         filteredTunnels.forEach(tunnel => {
             const createdDate = tunnel.created_at ? new Date(tunnel.created_at).toLocaleDateString('zh-CN') : '-';
             // status: healthy=在线, down=离线, degraded=异常, inactive=未连接
@@ -1191,9 +1179,7 @@ Object.assign(CloudflareManager.prototype, {
                 });
             }
 
-            // 归入对应的 Cloudflare 账户分组
-            const target = tunnelGroupContainers.get(this.accountGroupKey(tunnel.account));
-            (target || list).appendChild(item);
+            list.appendChild(item);
         });
     }
     ,
