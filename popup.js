@@ -39,6 +39,10 @@ class CloudflareManager {
         this.isLoadingPages = false;
         this.isLoadingTunnels = false;
         this.tunnelsSearchQuery = '';
+        // Tunnel 数据所属的本地账号 id（切换账号后与当前账号不一致即需重新拉取）
+        this.tunnelsLoadedForAccountId = '';
+        // Tunnel 加载失败的 Cloudflare 账户（用于 UI 提示，不再静默忽略）
+        this.tunnelLoadErrors = [];
         // 按账号保存的 Tunnel API Token：{ [accountId]: token }
         this.tunnelApiTokenByAccount = {};
 
@@ -900,9 +904,15 @@ class CloudflareManager {
         tokenInput.value = perAccount || this.tunnelApiToken || '';
         const hint = document.getElementById('tunnelTokenAccountHint');
         if (hint) {
-            hint.textContent = this.currentAccount
-                ? `将保存到账户「${this.currentAccount.name}」；留空则 Tunnel 使用该账户自身 Token。`
-                : '当前未选择账户，将保存为全局 Token。';
+            if (!this.currentAccount) {
+                hint.textContent = '当前未选择账户，将保存为全局 Token（仅作兼容兜底）。';
+            } else if (perAccount) {
+                hint.textContent = `已为账户「${this.currentAccount.name}」单独保存 Tunnel Token，读取该账号的隧道时优先使用。`;
+            } else if (this.tunnelApiToken) {
+                hint.textContent = `当前显示的是全局兼容 Token；点击保存会将其绑定到账户「${this.currentAccount.name}」。留空则使用该账号自身的 API Token（需具备 Account: Cloudflare Tunnel 读权限）。`;
+            } else {
+                hint.textContent = `将保存到账户「${this.currentAccount.name}」；留空则 Tunnel 使用该账号自身的 API Token（需具备 Account: Cloudflare Tunnel 读权限）。`;
+            }
         }
     }
 

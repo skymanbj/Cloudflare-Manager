@@ -478,71 +478,99 @@ Object.assign(CloudflareManager.prototype, {
 
     // Cloudflare Tunnel (cfd_tunnel) API Methods
     /**
+     * 判断扫描到的 Cloudflare 账户（{id, name}）是否属于当前选中的本地账号。
+     * 只做保守匹配：id 精确命中，或名称互相包含（邮箱简写互认）。
+     * 一旦误判，就会拿别的账号的凭据去请求，结果当前账号的 Tunnel 读不出来。
+     */
+    isCurrentAccountCfAccount(account) {
+        if (!account || !this.currentAccount) return false;
+        const current = this.currentAccount;
+        if (current.cfAccountId && current.cfAccountId === account.id) return true;
+
+        const localName = (current.name || '').toLowerCase().trim();
+        const cfName = (account.name || '').toLowerCase().trim();
+        if (!localName || !cfName) return false;
+        if (cfName === localName || cfName.includes(localName)) return true;
+        if (cfName.length >= 4 && localName.includes(cfName)) return true;
+        // 邮箱简写互认：liubohn69 与 liubohn69@gmail.com 视为同一账号
+        const localShort = localName.split('@')[0];
+        return localShort.length >= 4 && cfName.includes(localShort);
+    }
+    ,
+
+    /**
      * 根据扫描到的 Cloudflare 账户（{id, name}）找到本地已保存的账户。
-     * 本地账户使用 Date.now() 生成的 id，因此需要额外通过 CF 账户 id 或名称（模糊）匹配。
+     * 本地账户使用 Date.now() 生成的 id，因此只能通过 cfAccountId 精确匹配；
+     * 名称匹配仅作兜底，且要求名称足够具体，避免模糊匹配把账户串到别的账号。
      */
     findStoredAccount(cfId, cfName) {
         const list = this.accounts || [];
-        const lowerName = (cfName || '').toLowerCase();
-        let acc = list.find(a => a.id === cfId || a.cfAccountId === cfId);
+        if (!list.length) return null;
+        let acc = list.find(a => a.cfAccountId && a.cfAccountId === cfId);
         if (acc) return acc;
-        if (lowerName) {
-            acc = list.find(a => {
-                const n = (a.name || '').toLowerCase();
-                return n === lowerName || n.includes(lowerName) || lowerName.includes(n);
-            });
-        }
+        const lowerName = (cfName || '').toLowerCase().trim();
+        if (!lowerName || lowerName.length < 4) return null;
+        acc = list.find(a => {
+            const n = (a.name || '').toLowerCase().trim();
+            if (!n) return false;
+            return n === lowerName || (n.length >= 4 && (n.includes(lowerName) || lowerName.includes(n)));
+        });
         return acc || null;
     }
     ,
 
     /**
-     * 解析指定账号（扫描到的 CF 账户 {id, name}）的 Tunnel API Token（按账号隔离）：
-     * 1. 该账号显式保存的 Tunnel Token（tunnelApiTokenByAccount[本地账户id]）
-     * 2. 该账号自身保存的 API Token（使用自己的凭据，如 lbylylzy / hotmail）
-     * 3. 全局 Tunnel Token（兼容旧配置）
-     * 4. 当前选中账号的 Token（兜底）
+     * 解析某个 Cloudflare 账户可用的 Tunnel 凭据候选（按优先级排列）。
+     *
+     * 关键原则：当前选中账号自己的 Cloudflare 账户，只使用它自己的凭据，
+     * 不借用其它本地账号的 Token —— 否则会用别的凭据去请求当前账号的账户，
+     * 请求被 403 拒绝后被静默忽略，表现为「当前账号的 Tunnel 看不到」。
+     *
+     * 优先级：
+     * 1. 当前账号单独保存的 Tunnel Token（tunnelApiTokenByAccount[本地账户id]）
+     * 2. 当前账号自身的 API Token
+     * 3. 该 CF 账户明确归属于另一个本地账号时，才借用那个账号的凭据
+     * 4. 全局 Tunnel Token（兼容旧配置）
      */
-    getTunnelTokenForAccount(account) {
-        const stored = this.findStoredAccount(account?.id, account?.name);
-        if (stored) {
-            if (this.tunnelApiTokenByAccount && this.tunnelApiTokenByAccount[stored.id]) {
-                return this.tunnelApiTokenByAccount[stored.id];
-            }
-            if (stored.token) {
-                return stored.token;
+    getTunnelTokenCandidates(account) {
+        const current = this.currentAccount;
+        const candidates = [];
+        const push = (token) => {
+            const value = (token || '').trim();
+            if (value && !candidates.includes(value)) candidates.push(value);
+        };
+
+        // 1 / 2：当前账号自己的凭据
+        push(current?.id ? this.tunnelApiTokenByAccount?.[current.id] : '');
+        push(current?.token);
+
+        // 3：只有当这个 CF 账户不属于当前账号时，才允许借用归属账号的凭据
+        if (!this.isCurrentAccountCfAccount(account)) {
+            const stored = this.findStoredAccount(account?.id, account?.name);
+            if (stored && stored.id !== current?.id) {
+                push(this.tunnelApiTokenByAccount?.[stored.id]);
+                push(stored.token);
             }
         }
-        if (this.tunnelApiToken) {
-            return this.tunnelApiToken;
-        }
-        return this.currentAccount?.token || '';
+
+        // 4：全局 Tunnel Token（兼容旧配置）
+        push(this.tunnelApiToken);
+
+        return candidates;
     }
     ,
 
     async loadTunnels(force = false) {
         if (this.isLoadingTunnels) return;
         this.isLoadingTunnels = true;
+        this.tunnelLoadErrors = [];
         console.log(`[Tunnels] Loading tunnels using Deep-Scan mode...`);
 
         try {
             // Collect accounts from multiple sources (same as Workers / Pages)
             const uniqueAccounts = new Map();
 
-            // 1. Current Account
-            try {
-                const currentId = await this.getAccountId();
-                if (currentId) {
-                    uniqueAccounts.set(currentId, { id: currentId, name: this.currentAccount?.name || 'Primary' });
-                    // 缓存当前账户的 CF 账户 id，便于按账号匹配 Token（本地 id 为 Date.now() 生成）
-                    if (this.currentAccount && !this.currentAccount.cfAccountId) {
-                        this.currentAccount.cfAccountId = currentId;
-                        this.saveAccounts();
-                    }
-                }
-            } catch (e) { }
-
-            // 2. From /accounts API
+            // 1. From /accounts API（当前账号 Token 可见的全部 Cloudflare 账户）
             try {
                 const apiAccounts = await this.apiRequest('/accounts?per_page=50');
                 if (Array.isArray(apiAccounts)) {
@@ -554,7 +582,7 @@ Object.assign(CloudflareManager.prototype, {
                 console.warn('Failed to fetch /accounts for tunnels:', e);
             }
 
-            // 3. From Zones
+            // 2. From Zones
             if (this.zones && this.zones.length > 0) {
                 this.zones.forEach(z => {
                     if (z.account && z.account.id) {
@@ -568,46 +596,81 @@ Object.assign(CloudflareManager.prototype, {
                 });
             }
 
+            // 3. 当前账号兜底（/accounts 失败或未返回时）
+            try {
+                const currentId = await this.getAccountId();
+                if (currentId && !uniqueAccounts.has(currentId)) {
+                    uniqueAccounts.set(currentId, { id: currentId, name: this.currentAccount?.name || 'Primary' });
+                }
+            } catch (e) { }
+
             const allAccounts = Array.from(uniqueAccounts.values());
 
             if (allAccounts.length === 0) {
                 throw new Error('无法发现任何 Cloudflare 账户。请检查 API Token 权限。');
             }
 
+            // 3.5 记录当前账号对应的 Cloudflare 账户 id。
+            //     仅在名称确实匹配时写入，避免把别的账户记到自己头上（会导致后续请求用错凭据）。
+            const primary = allAccounts.find(a => this.isCurrentAccountCfAccount(a));
+            if (primary && this.currentAccount && this.currentAccount.cfAccountId !== primary.id) {
+                this.currentAccount.cfAccountId = primary.id;
+                this.saveAccounts();
+            }
+
             console.log(`Scanning ${allAccounts.length} accounts for Tunnels`);
 
             // Parallel fetch：分页拉取每个账号下的 Tunnel（排除已删除）
+            // 每个账号按「候选凭据」依次尝试，任一凭据成功即采用；
+            // 全部失败时记录错误，交给 UI 提示（不再静默丢弃）。
             const perPage = 50;
             const promises = allAccounts.map(async account => {
-                try {
-                    const tunnels = [];
-                    let page = 1;
-                    while (page <= 20) { // 安全上限：最多 1000 条
-                        const token = this.getTunnelTokenForAccount(account);
-                        const response = await this.cfApiFetch(
-                            `/accounts/${account.id}/cfd_tunnel?is_deleted=false&per_page=${perPage}&page=${page}`,
-                            token
-                        );
-                        const batch = response || [];
-                        tunnels.push(...batch);
-                        if (batch.length < perPage) break;
-                        page++;
-                    }
-                    return tunnels.map(tunnel => ({
-                        ...tunnel,
-                        account: {
-                            id: account.id,
-                            name: account.name
+                const candidates = this.getTunnelTokenCandidates(account);
+                let lastError = null;
+                for (const token of candidates) {
+                    try {
+                        const tunnels = [];
+                        let page = 1;
+                        while (page <= 20) { // 安全上限：最多 1000 条
+                            const response = await this.cfApiFetch(
+                                `/accounts/${account.id}/cfd_tunnel?is_deleted=false&per_page=${perPage}&page=${page}`,
+                                token
+                            );
+                            const batch = response || [];
+                            tunnels.push(...batch);
+                            if (batch.length < perPage) break;
+                            page++;
                         }
-                    }));
-                } catch (err) {
-                    console.warn(`Failed to fetch tunnels for account ${account.name} (${account.id}):`, err);
-                    return [];
+                        return {
+                            tunnels: tunnels.map(tunnel => ({
+                                ...tunnel,
+                                account: {
+                                    id: account.id,
+                                    name: account.name
+                                }
+                            })),
+                            error: null
+                        };
+                    } catch (err) {
+                        lastError = err;
+                    }
                 }
+                console.warn(`Failed to fetch tunnels for account ${account.name} (${account.id}):`, lastError);
+                return {
+                    tunnels: [],
+                    error: {
+                        name: account.name,
+                        id: account.id,
+                        message: lastError?.message || '未知错误',
+                        isCurrent: this.isCurrentAccountCfAccount(account)
+                    }
+                };
             });
 
             const results = await Promise.all(promises);
-            const newTunnels = results.flat();
+            const newTunnels = results.flatMap(r => r.tunnels);
+            const loadErrors = results.map(r => r.error).filter(Boolean);
+            this.tunnelLoadErrors = loadErrors;
 
             if (force || newTunnels.length > 0 || this.tunnels.length === 0) {
                 this.tunnels = newTunnels;
@@ -622,6 +685,9 @@ Object.assign(CloudflareManager.prototype, {
             }
 
             console.log(`[Tunnels] Total tunnels loaded: ${this.tunnels.length} from ${allAccounts.length} accounts.`);
+
+            // 记录本次数据所属账号，供切账号时判断是否需要重新拉取
+            this.tunnelsLoadedForAccountId = this.currentAccount?.id || '';
 
             await this.saveResourceCache(); // 保存缓存
 
@@ -650,7 +716,7 @@ Object.assign(CloudflareManager.prototype, {
         }
         try {
             this.showLoading();
-            const token = this.getTunnelTokenForAccount(tunnel.account);
+            const token = this.getTunnelTokenCandidates(tunnel.account)[0] || '';
             await this.cfApiFetch(
                 `/accounts/${accountId}/cfd_tunnel/${tunnel.id}`,
                 token,
@@ -717,6 +783,8 @@ Object.assign(CloudflareManager.prototype, {
             this.pages = [];
             this.tunnels = [];
             this.tunnelsSearchQuery = '';
+            this.tunnelsLoadedForAccountId = ''; // 标记 Tunnel 数据待重新拉取（避免显示上一个账号的缓存）
+            this.tunnelLoadErrors = [];
             this.accountId = null; // 必须重置，否则 getAccountId 会返回旧记录
 
             // 4. 加载缓存（极速）

@@ -3400,6 +3400,79 @@ textarea::placeholder {
   min-width: 0;
 }
 
+/* Tunnel 读取失败提示：区分「读不到」与「没有隧道」 */
+.tunnel-load-warning {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  background: rgba(248, 81, 73, 0.08);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.tunnel-load-warning-title {
+  font-weight: 600;
+  color: var(--danger);
+  margin-bottom: 6px;
+}
+
+.tunnel-load-warning-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tunnel-load-warning-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tunnel-error-account {
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tunnel-error-msg {
+  color: var(--text-muted);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.tunnel-error-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.tunnel-load-warning-hint {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.tunnel-load-warning-hint code {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 11px;
+}
+
 .tunnel-intro {
   display: flex;
   gap: var(--spacing-lg);

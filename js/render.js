@@ -99,7 +99,10 @@ Object.assign(CloudflareManager.prototype, {
             }
         }
         if (tab === 'tunnels') {
-            if (this.tunnels.length === 0) {
+            // 数据不属于当前账号（刚切换过账号）时必须重新拉取，否则会显示上一个账号的隧道
+            const loadedFor = this.tunnelsLoadedForAccountId || '';
+            const currentAccountId = this.currentAccount?.id || '';
+            if (this.tunnels.length === 0 || loadedFor !== currentAccountId) {
                 this.loadTunnelsAndRender();
             } else {
                 this.renderTunnels();
@@ -983,6 +986,7 @@ Object.assign(CloudflareManager.prototype, {
     // =====================================================
     async loadTunnelsAndRender() {
         const tunnelsList = document.getElementById('tunnelsList');
+        if (!tunnelsList) return;
 
         try {
             tunnelsList.innerHTML = '<div class="loading">正在加载 Tunnel...</div>';
@@ -1019,12 +1023,45 @@ Object.assign(CloudflareManager.prototype, {
     }
     ,
 
+    /**
+     * 构建 Tunnel 读取失败提示条
+     * 之前单个账户读取失败会被静默忽略，用户只能看到"别的账号的隧道"，
+     * 看起来像当前账号没有隧道；这里把失败原因显式呈现出来。
+     */
+    buildTunnelErrorNotice(errors) {
+        const notice = document.createElement('div');
+        notice.className = 'tunnel-load-warning';
+        const hasCurrent = errors.some(e => e.isCurrent);
+        const rows = errors.map(e => `
+                <li>
+                    <span class="tunnel-error-account">${this.escapeHtml(e.name || e.id || '未知账户')}</span>
+                    <span class="tunnel-error-msg">${this.escapeHtml(e.message || '未知错误')}</span>
+                    ${e.isCurrent ? '<span class="tunnel-error-badge">当前账号</span>' : ''}
+                </li>`).join('');
+        notice.innerHTML = `
+                <div class="tunnel-load-warning-title">⚠ ${errors.length} 个 Cloudflare 账户的 Tunnel 读取失败</div>
+                <ul class="tunnel-load-warning-list">${rows}</ul>
+                <div class="tunnel-load-warning-hint">
+                    请切换到对应账号，在「面板入口 → Tunnel API Token」中为该账号保存具备
+                    <code>Account: Cloudflare Tunnel</code> 读权限的 API Token，再点击右上角刷新。
+                    ${hasCurrent ? '<br>其中包含当前账号：该账号的 Tunnel 需要单独配置 Token 才会显示。' : ''}
+                </div>
+            `;
+        return notice;
+    }
+    ,
+
     renderTunnels() {
         const list = document.getElementById('tunnelsList');
+        if (!list) return;
         const filteredTunnels = this.getFilteredTunnels();
+        const loadErrors = this.tunnelLoadErrors || [];
 
         if (filteredTunnels.length === 0) {
-            if (this.tunnelsSearchQuery) {
+            if (loadErrors.length > 0) {
+                list.innerHTML = '<div class="empty-state"><p>未获取到 Tunnel 数据（部分账户读取失败，见下方提示）</p></div>';
+                list.appendChild(this.buildTunnelErrorNotice(loadErrors));
+            } else if (this.tunnelsSearchQuery) {
                 list.innerHTML = `
                         <div class="empty-state">
                             <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
@@ -1052,6 +1089,11 @@ Object.assign(CloudflareManager.prototype, {
 
         list.innerHTML = '';
 
+        // 读取失败的账户提示（避免「读不到」被误认为是「没有隧道」）
+        if (loadErrors.length > 0) {
+            list.appendChild(this.buildTunnelErrorNotice(loadErrors));
+        }
+
         // 如果有搜索关键词，显示搜索结果统计
         if (this.tunnelsSearchQuery) {
             const searchInfo = document.createElement('div');
@@ -1060,7 +1102,19 @@ Object.assign(CloudflareManager.prototype, {
             list.appendChild(searchInfo);
         }
 
-        // Tunnel 不再按账号分组，直接平铺展示（Tunnel 数量通常较少）
+        // 按 Cloudflare 账户分组展示（与 Workers / Pages / 笔记保持一致）
+        const tunnelGroups = this.groupByAccount(filteredTunnels);
+        const tunnelGroupContainers = new Map();
+        tunnelGroups.forEach(group => {
+            const { groupDiv, itemsDiv } = this.createAccountGroup(
+                group,
+                'tunnels',
+                `${group.items.length} 个 Tunnel`
+            );
+            list.appendChild(groupDiv);
+            tunnelGroupContainers.set(group.key, itemsDiv);
+        });
+
         filteredTunnels.forEach(tunnel => {
             const createdDate = tunnel.created_at ? new Date(tunnel.created_at).toLocaleDateString('zh-CN') : '-';
             // status: healthy=在线, down=离线, degraded=异常, inactive=未连接
@@ -1137,7 +1191,9 @@ Object.assign(CloudflareManager.prototype, {
                 });
             }
 
-            list.appendChild(item);
+            // 归入对应的 Cloudflare 账户分组
+            const target = tunnelGroupContainers.get(this.accountGroupKey(tunnel.account));
+            (target || list).appendChild(item);
         });
     }
     ,
@@ -1200,7 +1256,8 @@ Object.assign(CloudflareManager.prototype, {
                 this.renderPages();
                 break;
             case 'tunnels':
-                this.renderTunnels();
+                // 重新拉取而不是只重渲染：保存新的 Tunnel Token 后必须重新请求才能生效
+                this.loadTunnelsAndRender();
                 break;
             case 'notes':
                 this.loadRemarksAndRender();
