@@ -299,14 +299,7 @@ Object.assign(CloudflareManager.prototype, {
 
             if (!this.remarks || Object.keys(this.remarks).length === 0) {
                 if (remarksList) remarksList.innerHTML = '';
-                if (emptyState) {
-                    emptyState.style.display = 'block';
-                    // DEBUG INFO
-                    const debugInfo = document.createElement('div');
-                    debugInfo.style.cssText = 'margin-top: 10px; font-size: 10px; color: #999; text-align: center;';
-                    debugInfo.textContent = `Debug: Storage key count = ${this.remarks ? Object.keys(this.remarks).length : 'null'}`;
-                    emptyState.appendChild(debugInfo);
-                }
+                if (emptyState) emptyState.style.display = 'block';
                 this.updateRemarksStats([]);
                 return;
             }
@@ -394,22 +387,19 @@ Object.assign(CloudflareManager.prototype, {
             this.updateRemarksStats(filtered);
 
             // 更新总数统计卡片 (反映当前可见数量)
-            const notesStatCard = document.getElementById('notesStatCard');
-            if (notesStatCard) {
-                const statNumberEl = notesStatCard.querySelector('.stat-number');
-                if (statNumberEl) {
-                    statNumberEl.textContent = filtered.length + ' 条备注';
-                }
+            const notesCountEl = document.getElementById('notesCount');
+            if (notesCountEl) {
+                notesCountEl.textContent = filtered.length + ' 条备注';
             }
 
             if (filtered.length === 0) {
-                remarksList.innerHTML = '';
-                emptyState.style.display = 'block';
+                if (remarksList) remarksList.innerHTML = '';
+                if (emptyState) emptyState.style.display = 'block';
                 return;
             }
 
-            emptyState.style.display = 'none';
-            remarksList.innerHTML = '';
+            if (emptyState) emptyState.style.display = 'none';
+            if (remarksList) remarksList.innerHTML = '';
 
             // 统一解析每条备注的所属账号，保证「分组」与「卡片标签」使用同一份结果
             const typeLabels = {

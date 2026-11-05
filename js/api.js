@@ -674,19 +674,41 @@ Object.assign(CloudflareManager.prototype, {
     // 加载所有域名和所有记录
     async loadAllZonesAndRecords() {
         const tabsSection = document.getElementById('tabsSection');
-        const dnsSection = document.getElementById('dnsSection');
         const recordsList = document.getElementById('recordsList');
 
         try {
-            // 1. 瞬间呈现 Tab
-            tabsSection.style.display = 'block';
-            dnsSection.style.display = 'block';
+            // 1. 呈现 Tab，并按当前标签只显示对应区块
+            //    （避免在 Workers/Pages/Tunnel/笔记 标签下切换账号时，DNS 区与当前区同时出现）
+            if (tabsSection) tabsSection.style.display = 'block';
+            const tabSections = {
+                dns: 'dnsSection',
+                workers: 'workersSection',
+                pages: 'pagesSection',
+                tunnels: 'tunnelsSection',
+                notes: 'notesSection'
+            };
+            Object.entries(tabSections).forEach(([tab, id]) => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = tab === this.currentTab ? 'block' : 'none';
+            });
 
-            // 2. 状态重置
+            // 2. 状态重置（同时清空各列表搜索框，避免 UI 与查询条件不一致）
             this.selectedZoneId = '';
             this.searchQuery = '';
-            document.getElementById('searchInput').value = '';
-            document.getElementById('clearSearchBtn').style.display = 'none';
+            this.workersSearchQuery = '';
+            this.pagesSearchQuery = '';
+            this.remarksSearchQuery = '';
+            this.remarksTypeFilter = '';
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) searchInput.value = '';
+            const clearSearchBtn = document.getElementById('clearSearchBtn');
+            if (clearSearchBtn) clearSearchBtn.style.display = 'none';
+            ['workersSearchInput', 'pagesSearchInput', 'remarksSearchInput', 'tunnelsSearchInput'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            const remarksTypeFilterEl = document.getElementById('remarksTypeFilter');
+            if (remarksTypeFilterEl) remarksTypeFilterEl.value = '';
 
             // 3. 数据重置，但先尝试加载缓存以保持界面不为空白
             this.zones = [];
@@ -722,7 +744,9 @@ Object.assign(CloudflareManager.prototype, {
                     await this.loadAllRecords();
 
                     // 更新统计与 UI
-                    this.collapsedZones = new Set(this.zones.map(z => z.name));
+                    // 仅保留仍存在的域名的折叠状态，避免每次刷新都把用户展开的全收起
+                    const zoneNames = new Set(this.zones.map(z => z.name));
+                    this.collapsedZones = new Set([...this.collapsedZones].filter(n => zoneNames.has(n)));
                     const recordCountEl = document.getElementById('recordCount');
                     if (recordCountEl) recordCountEl.textContent = `${this.allRecords.length} 条记录`;
 
@@ -732,9 +756,11 @@ Object.assign(CloudflareManager.prototype, {
                     // 最后触发一次 UI 颜色等更新 (因为此时 accountId 肯定拿到了)
                     this.updateHeaderAccountUI();
 
-                    // 自动加载 Workers/Pages (取决于当前在哪个 Tab)
+                    // 自动加载当前 Tab 对应的数据
                     if (this.currentTab === 'workers') this.loadWorkersAndRender();
                     if (this.currentTab === 'pages') this.loadPagesAndRender();
+                    if (this.currentTab === 'tunnels') this.loadTunnelsAndRender();
+                    if (this.currentTab === 'notes') this.loadRemarksAndRender();
 
                     await this.saveResourceCache();
                     console.log('[AccountSwitch] Background refresh completed.');

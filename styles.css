@@ -518,7 +518,7 @@ body {
   align-items: stretch;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 760px) {
   .workers-list {
     grid-template-columns: 1fr;
   }
@@ -678,7 +678,7 @@ body {
   align-items: stretch;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 760px) {
   .pages-list {
     grid-template-columns: 1fr;
   }
@@ -2296,7 +2296,7 @@ textarea.text-input {
   padding: 2px 0;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 760px) {
   .remarks-group-list {
     grid-template-columns: 1fr;
   }
@@ -3382,7 +3382,7 @@ textarea::placeholder {
   align-items: stretch;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 760px) {
   .tunnels-list {
     grid-template-columns: 1fr;
   }
@@ -3599,7 +3599,7 @@ textarea::placeholder {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 760px) {
   .account-group-items {
     grid-template-columns: 1fr;
   }

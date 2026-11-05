@@ -211,6 +211,8 @@ Object.assign(CloudflareManager.prototype, {
         if (!headerAccountName) return;
 
         if (this.currentAccount) {
+            // 记录本次渲染的账户，异步回写颜色前校验，避免快速切换时套错颜色
+            const renderAccountLocalId = this.currentAccount.id;
             headerAccountName.textContent = this.currentAccount.name;
             headerAccountName.style.display = 'inline-block';
             headerAccountName.className = 'header-account-badge';
@@ -220,7 +222,7 @@ Object.assign(CloudflareManager.prototype, {
                 try {
                     // 如果本地已经有 accountId (从缓存加载的)，则直接使用
                     const realAccountId = await this.getAccountId();
-                    if (realAccountId && this.currentAccount) {
+                    if (realAccountId && this.currentAccount && this.currentAccount.id === renderAccountLocalId) {
                         const colorClass = this.getAccountColorClass(realAccountId);
                         headerAccountName.classList.add(colorClass);
                     }
@@ -238,7 +240,8 @@ Object.assign(CloudflareManager.prototype, {
         const select = document.getElementById('accountSelect');
         select.innerHTML = '<option value="">请选择账户</option>';
 
-        this.accounts.forEach(account => {
+        // 与侧边栏保持同一顺序（置顶账号优先）
+        this.getOrderedAccounts().forEach(account => {
             const option = document.createElement('option');
             option.value = account.id;
             option.textContent = account.name;
@@ -283,8 +286,8 @@ Object.assign(CloudflareManager.prototype, {
             groupedRecords[record.zoneName].push(record);
         });
 
-        // 确定要显示的域名列表
-        let zonesToRender = this.zones;
+        // 确定要显示的域名列表（复制一份，避免 sort 原地改变 this.zones 的顺序）
+        let zonesToRender = [...this.zones];
 
         // 1. 如果选择了特定域名筛选
         if (this.selectedZoneId) {
@@ -441,6 +444,9 @@ Object.assign(CloudflareManager.prototype, {
             groupContainer.appendChild(recordsContainer);
             list.appendChild(groupContainer);
         });
+
+        // 渲染后同步「全部展开/折叠」按钮的文案与图标
+        this.updateToggleAllButton();
     }
     ,
 
@@ -458,7 +464,8 @@ Object.assign(CloudflareManager.prototype, {
 
     // 全部展开/折叠
     toggleAllZones() {
-        const allCollapsed = this.collapsedZones.size === this.zones.length;
+        const total = this.zones.length;
+        const allCollapsed = total > 0 && this.collapsedZones.size >= total;
 
         if (allCollapsed) {
             // 全部展开
@@ -476,16 +483,15 @@ Object.assign(CloudflareManager.prototype, {
     // 更新展开/折叠按钮状态
     updateToggleAllButton() {
         const btn = document.getElementById('toggleAllBtn');
-        const icon = document.getElementById('toggleAllIcon');
-        const allCollapsed = this.collapsedZones.size === this.zones.length;
+        if (!btn) return;
 
-        if (allCollapsed) {
-            icon.textContent = '▼';
-            btn.innerHTML = '<span id="toggleAllIcon">▼</span> 全部展开';
-        } else {
-            icon.textContent = '▲';
-            btn.innerHTML = '<span id="toggleAllIcon">▲</span> 全部折叠';
-        }
+        const total = this.zones.length;
+        const allCollapsed = total > 0 && this.collapsedZones.size >= total;
+        const icon = allCollapsed ? '▼' : '▲';
+        const label = allCollapsed ? '全部展开' : '全部折叠';
+
+        btn.innerHTML = `<span id="toggleAllIcon">${icon}</span> ${label}`;
+        btn.title = allCollapsed ? '展开全部域名' : '折叠全部域名';
     }
     ,
 
@@ -527,6 +533,10 @@ Object.assign(CloudflareManager.prototype, {
                 await this.loadWorkersAndRender();
             } else if (this.currentTab === 'pages') {
                 await this.loadPagesAndRender();
+            } else if (this.currentTab === 'tunnels') {
+                await this.loadTunnelsAndRender();
+            } else if (this.currentTab === 'notes') {
+                await this.loadRemarksAndRender();
             }
             this.showToast('刷新完成', 'success');
         }

@@ -8,27 +8,62 @@
 
 Object.assign(CloudflareManager.prototype, {
         /**
-         * 初始化主题：从 chrome.storage 读取用户偏好，默认暗色
+         * 初始化主题
+         * 首屏已由 theme-init.js 同步设置；这里再与 chrome.storage 对齐（用于跨设备/旧版本迁移）。
          */
         initTheme() {
-            const apply = (theme) => this.applyTheme(theme === 'light' ? 'light' : 'dark');
+            const isTheme = (t) => t === 'light' || t === 'dark';
+            const apply = (theme) => this.applyTheme(isTheme(theme) ? theme : 'dark');
+
+            // 1. 同步读取 localStorage（theme-init.js 写入的那份）
+            let local = null;
+            try { local = localStorage.getItem('cf-theme'); } catch (e) { /* 忽略 */ }
+            if (isTheme(local)) apply(local);
+
+            // 2. 与 chrome.storage 对齐；仅当本地没有偏好时才覆盖
             if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
                 try {
-                    chrome.storage.local.get('theme', (result) => apply(result && result.theme));
+                    chrome.storage.local.get('theme', (result) => {
+                        const stored = result && result.theme;
+                        if (isTheme(stored)) {
+                            if (!isTheme(local)) apply(stored);
+                        } else if (!isTheme(local)) {
+                            const prefersLight = window.matchMedia &&
+                                window.matchMedia('(prefers-color-scheme: light)').matches;
+                            apply(prefersLight ? 'light' : 'dark');
+                        }
+                    });
                 } catch (e) {
-                    apply('dark');
+                    if (!isTheme(local)) apply('dark');
                 }
-            } else {
-                apply('dark');
+            } else if (!isTheme(local)) {
+                const prefersLight = window.matchMedia &&
+                    window.matchMedia('(prefers-color-scheme: light)').matches;
+                apply(prefersLight ? 'light' : 'dark');
             }
         }
 ,
 
         /**
-         * 应用主题到 <html data-theme>
+         * 应用主题到 <html data-theme>，同步写入 localStorage 与按钮可访问性状态
          */
         applyTheme(theme) {
-            document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+            const next = theme === 'light' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            try { localStorage.setItem('cf-theme', next); } catch (e) { /* 忽略 */ }
+            this.updateThemeToggleA11y(next);
+        }
+,
+
+        /**
+         * 同步主题按钮的 title / aria-pressed
+         */
+        updateThemeToggleA11y(theme) {
+            const btn = document.getElementById('themeToggleBtn');
+            if (!btn) return;
+            const isLight = theme === 'light';
+            btn.setAttribute('aria-pressed', isLight ? 'true' : 'false');
+            btn.title = isLight ? '切换到暗色主题' : '切换到亮色主题';
         }
 ,
 
@@ -113,11 +148,18 @@ Object.assign(CloudflareManager.prototype, {
 
         showToast(message, type = 'info') {
             const toast = document.getElementById('toast');
+            if (!toast) return;
+            // 清除上一条提示的定时器，避免它提前隐藏新提示
+            if (this._toastTimer) {
+                clearTimeout(this._toastTimer);
+                this._toastTimer = null;
+            }
             toast.textContent = message;
             toast.className = `toast ${type} show`;
     
-            setTimeout(() => {
+            this._toastTimer = setTimeout(() => {
                 toast.classList.remove('show');
+                this._toastTimer = null;
             }, 3000);
         }
 ,

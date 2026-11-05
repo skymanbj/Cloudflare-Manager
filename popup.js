@@ -225,19 +225,19 @@ class CloudflareManager {
     // =====================================================
     bindEvents() {
         // Sidebar menu
-        document.getElementById('menuBtn').addEventListener('click', () => this.openSidebar());
-        document.getElementById('closeSidebar').addEventListener('click', () => this.closeSidebar());
-        document.getElementById('sidebarOverlay').addEventListener('click', () => this.closeSidebar());
+        document.getElementById('menuBtn')?.addEventListener('click', () => this.openSidebar());
+        document.getElementById('closeSidebar')?.addEventListener('click', () => this.closeSidebar());
+        document.getElementById('sidebarOverlay')?.addEventListener('click', () => this.closeSidebar());
 
         // Header actions
-        document.getElementById('refreshBtn').addEventListener('click', () => this.refresh());
-        document.getElementById('exportBtn').addEventListener('click', () => this.exportData());
+        document.getElementById('refreshBtn')?.addEventListener('click', () => this.refresh());
+        document.getElementById('exportBtn')?.addEventListener('click', () => this.exportData());
         document.getElementById('exportAllBtn')?.addEventListener('click', () => this.exportAllAccountsData());
         const themeToggleBtn = document.getElementById('themeToggleBtn');
         if (themeToggleBtn) themeToggleBtn.addEventListener('click', () => this.toggleTheme());
 
         // Welcome section
-        document.getElementById('welcomeAddAccountBtn').addEventListener('click', () => this.openSidebar());
+        document.getElementById('welcomeAddAccountBtn')?.addEventListener('click', () => this.openSidebar());
 
         // 点击头部账户名切换到下一个账户
         const headerAccountName = document.getElementById('headerAccountName');
@@ -247,9 +247,9 @@ class CloudflareManager {
         }
 
         // Account management (in sidebar)
-        document.getElementById('saveAccountBtn').addEventListener('click', () => this.saveAccount());
-        document.getElementById('deleteAccountBtn').addEventListener('click', () => this.deleteAccount());
-        document.getElementById('accountSelect').addEventListener('change', (e) => this.switchAccount(e.target.value));
+        document.getElementById('saveAccountBtn')?.addEventListener('click', () => this.saveAccount());
+        document.getElementById('deleteAccountBtn')?.addEventListener('click', () => this.deleteAccount());
+        document.getElementById('accountSelect')?.addEventListener('change', (e) => this.switchAccount(e.target.value));
 
         // Tab switching
         document.querySelectorAll('.tab').forEach(tab => {
@@ -257,7 +257,7 @@ class CloudflareManager {
         });
 
         // New Deployment buttons
-        document.getElementById('createNewWorkerBtn').addEventListener('click', async () => {
+        document.getElementById('createNewWorkerBtn')?.addEventListener('click', async () => {
             const accountId = await this.getAccountId();
             if (accountId) {
                 window.open(`https://dash.cloudflare.com/${accountId}/workers-and-pages/create/workers`, '_blank');
@@ -265,7 +265,7 @@ class CloudflareManager {
                 this.showToast('无法获取账户 ID', 'error');
             }
         });
-        document.getElementById('createNewPagesBtn').addEventListener('click', async () => {
+        document.getElementById('createNewPagesBtn')?.addEventListener('click', async () => {
             const accountId = await this.getAccountId();
             if (accountId) {
                 window.open(`https://dash.cloudflare.com/${accountId}/workers-and-pages/create/pages`, '_blank');
@@ -273,36 +273,33 @@ class CloudflareManager {
                 this.showToast('无法获取账户 ID', 'error');
             }
         });
-        document.getElementById('exportWorkersBtn').addEventListener('click', () => this.exportWorkers());
-        document.getElementById('exportPagesBtn').addEventListener('click', () => this.exportPages());
-
         // DNS record form
-        document.getElementById('addRecordBtn').addEventListener('click', () => this.showRecordForm());
-        document.getElementById('cancelRecordBtn').addEventListener('click', () => this.hideRecordForm());
-        document.getElementById('saveRecordBtn').addEventListener('click', () => this.saveRecord());
-        document.getElementById('recordType').addEventListener('change', (e) => this.handleRecordTypeChange(e.target.value));
+        document.getElementById('addRecordBtn')?.addEventListener('click', () => this.showRecordForm());
+        document.getElementById('cancelRecordBtn')?.addEventListener('click', () => this.hideRecordForm());
+        document.getElementById('saveRecordBtn')?.addEventListener('click', () => this.saveRecord());
+        document.getElementById('recordType')?.addEventListener('change', (e) => this.handleRecordTypeChange(e.target.value));
 
         // Deployment modal
-        document.getElementById('closeDeployModalBtn').addEventListener('click', () => this.hideDeployModal());
-        document.getElementById('cancelDeployBtn').addEventListener('click', () => this.hideDeployModal());
-        document.getElementById('startDeployBtn').addEventListener('click', () => this.startDeployment());
-        document.getElementById('uploadScriptBtn').addEventListener('click', () => document.getElementById('workerScriptFile').click());
-        document.getElementById('workerScriptFile').addEventListener('change', (e) => this.handleWorkerScriptUpload(e));
+        document.getElementById('closeDeployModalBtn')?.addEventListener('click', () => this.hideDeployModal());
+        document.getElementById('cancelDeployBtn')?.addEventListener('click', () => this.hideDeployModal());
+        document.getElementById('startDeployBtn')?.addEventListener('click', () => this.startDeployment());
+        document.getElementById('uploadScriptBtn')?.addEventListener('click', () => document.getElementById('workerScriptFile').click());
+        document.getElementById('workerScriptFile')?.addEventListener('change', (e) => this.handleWorkerScriptUpload(e));
 
         // Toggle sidebar
         // Toggle all zones
-        document.getElementById('toggleAllBtn').addEventListener('click', () => this.toggleAllZones());
+        document.getElementById('toggleAllBtn')?.addEventListener('click', () => this.toggleAllZones());
 
         // Search and filter functionality
-        document.getElementById('searchInput').addEventListener('input', (e) => this.handleSearch(e.target.value));
-        document.getElementById('clearSearchBtn').addEventListener('click', () => this.clearSearch());
-        document.getElementById('zoneFilter').addEventListener('change', (e) => this.handleZoneFilter(e.target.value));
+        document.getElementById('searchInput')?.addEventListener('input', (e) => this.handleSearch(e.target.value));
+        document.getElementById('clearSearchBtn')?.addEventListener('click', () => this.clearSearch());
+        document.getElementById('zoneFilter')?.addEventListener('change', (e) => this.handleZoneFilter(e.target.value));
 
         // Workers search
-        document.getElementById('workersSearchInput').addEventListener('input', (e) => this.handleWorkersSearch(e.target.value));
+        document.getElementById('workersSearchInput')?.addEventListener('input', (e) => this.handleWorkersSearch(e.target.value));
 
         // Pages search
-        document.getElementById('pagesSearchInput').addEventListener('input', (e) => this.handlePagesSearch(e.target.value));
+        document.getElementById('pagesSearchInput')?.addEventListener('input', (e) => this.handlePagesSearch(e.target.value));
 
         // Tunnels search
         const tunnelsSearchInput = document.getElementById('tunnelsSearchInput');
@@ -561,6 +558,9 @@ class CloudflareManager {
             return;
         }
 
+        // 记录保存前的当前账户，失败时用于恢复
+        const prevAccount = this.currentAccount;
+
         try {
             this.showLoading();
 
@@ -570,9 +570,8 @@ class CloudflareManager {
                 throw new Error('API Token 无效');
             }
 
-            // Get zones count
-            const tempAccount = { token };
-            this.currentAccount = tempAccount;
+            // 临时用新 token 拉取域名数量（catch 中会恢复原账户）
+            this.currentAccount = { token };
             const zones = await this.loadZones();
 
             if (this.editingAccountId) {
@@ -585,6 +584,10 @@ class CloudflareManager {
                         token,
                         zonesCount: zones.length
                     };
+                    // 若编辑的是当前账户，保持引用同步
+                    if (prevAccount?.id === this.editingAccountId) {
+                        this.currentAccount = this.accounts[index];
+                    }
                 }
             } else {
                 // Create new account
@@ -606,6 +609,8 @@ class CloudflareManager {
             this.showToast('账户保存成功', 'success');
 
         } catch (error) {
+            // 失败时恢复原账户，避免 currentAccount 被临时 {token} 对象污染
+            this.currentAccount = prevAccount;
             this.hideLoading();
             this.showToast(error.message, 'error');
         }
@@ -682,8 +687,15 @@ class CloudflareManager {
     async switchAccount(accountId) {
         if (!accountId) {
             this.currentAccount = null;
-            document.getElementById('statsSection').style.display = 'none';
-            document.getElementById('dnsSection').style.display = 'none';
+            // 清空所有内容区块，避免残留上一个账户的界面
+            ['statsSection', 'tabsSection', 'dnsSection', 'workersSection',
+             'pagesSection', 'tunnelsSection', 'notesSection'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            const headerAccountName = document.getElementById('headerAccountName');
+            if (headerAccountName) headerAccountName.style.display = 'none';
+            this.updateTunnelTokenInput();
             return;
         }
 
