@@ -184,6 +184,7 @@ class CloudflareManager {
         this.configMarked();
         this.bindEvents();
         this.bindGithubSyncEvents();
+        this.initFeatures?.();
 
         // Auto-select account if none selected but available
         if (!this.currentAccount && this.accounts.length > 0) {
@@ -491,6 +492,7 @@ class CloudflareManager {
         const token = document.getElementById('githubToken')?.value.trim() || '';
         const repo = document.getElementById('githubRepo')?.value.trim() || '';
         const branch = document.getElementById('githubBranch')?.value.trim() || 'main';
+        const syncPassword = document.getElementById('githubSyncPassword')?.value || '';
         const timerSync = document.getElementById('enableTimerSync')?.checked || false;
         const syncInterval = parseInt(document.getElementById('syncInterval')?.value) || 30;
 
@@ -518,6 +520,7 @@ class CloudflareManager {
             token,
             repo,
             branch,
+            syncPassword,
             timerSync,
             syncInterval,
             lastSyncTime: this.githubSync.config?.lastSyncTime || null
@@ -858,6 +861,8 @@ class CloudflareManager {
             this.showLoading();
 
             if (this.editingRecordId) {
+                const prev = this.allRecords?.find(r => r.id === this.editingRecordId);
+                if (prev) await this.saveDnsSnapshot?.('修改前', [prev]);
                 await this.updateRecord(this.editingZoneId, this.editingRecordId, recordData);
                 this.showToast('记录更新成功', 'success');
             } else {
@@ -879,6 +884,8 @@ class CloudflareManager {
         if (confirm('确定要删除此 DNS 记录吗？')) {
             try {
                 this.showLoading();
+                const prev = this.allRecords?.find(r => r.id === recordId);
+                if (prev) await this.saveDnsSnapshot?.('删除前', [prev]);
                 await this.deleteRecord(zoneId, recordId);
                 this.hideLoading();
                 this.showToast('记录已删除', 'success');

@@ -97,6 +97,33 @@ const GitHubSyncCore = {
      * 获取远程同步数据
      * 文件不存在（404）时返回 { remarks: {}, deletedKeys: [], sha: null }
      */
+    async encryptWithPassword(plainObj, password) {
+        const enc = new TextEncoder();
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']);
+        const key = await crypto.subtle.deriveKey(
+            { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+            keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+        );
+        const cipherBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(plainObj)));
+        const toB64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+        return { encrypted: true, v: 1, salt: toB64(salt), iv: toB64(iv), data: toB64(cipherBuf) };
+    },
+
+    async decryptWithPassword(encObj, password) {
+        const fromB64 = (str) => Uint8Array.from(atob(str), c => c.charCodeAt(0));
+        const enc = new TextEncoder();
+        const dec = new TextDecoder();
+        const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']);
+        const key = await crypto.subtle.deriveKey(
+            { name: 'PBKDF2', salt: fromB64(encObj.salt), iterations: 100000, hash: 'SHA-256' },
+            keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+        );
+        const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(encObj.iv) }, key, fromB64(encObj.data));
+        return JSON.parse(dec.decode(plainBuf));
+    },
+
     async getRemoteData(config) {
         const { owner, repo } = this.ensureConfig(config);
         const branch = this.getBranch(config);
@@ -123,7 +150,17 @@ const GitHubSyncCore = {
         }
 
         const data = await response.json();
-        const content = JSON.parse(this.base64ToUtf8(data.content));
+        let content = JSON.parse(this.base64ToUtf8(data.content));
+        if (content && content.encrypted && content.data) {
+            if (!config.syncPassword) {
+                throw new Error('远程同步数据已加密，请先填写“同步加密密码”');
+            }
+            try {
+                content = await this.decryptWithPassword(content, config.syncPassword);
+            } catch (e) {
+                throw new Error('同步加密密码错误，无法解密远程数据');
+            }
+        }
 
         console.log(`[GitHubSync] Fetched remote data. key_count=${content.remarks ? Object.keys(content.remarks).length : 0}`);
         return { ...content, sha: data.sha };
@@ -144,7 +181,7 @@ const GitHubSyncCore = {
 
         const body = {
             message: `${message} - ${new Date().toISOString()}`,
-            content: this.utf8ToBase64(JSON.stringify(data, null, 2)),
+            content: this.utf8ToBase64(JSON.stringify(config.syncPassword ? await this.encryptWithPassword(data, config.syncPassword) : data, null, 2)),
             branch: branch
         };
 
@@ -533,6 +570,7 @@ class GitHubSyncManager {
         const tokenInput = document.getElementById('githubToken');
         const repoInput = document.getElementById('githubRepo');
         const branchInput = document.getElementById('githubBranch');
+        const syncPwdInput = document.getElementById('githubSyncPassword');
         const timerCheckbox = document.getElementById('enableTimerSync');
         const intervalGroup = document.getElementById('syncIntervalGroup');
         const intervalSelect = document.getElementById('syncInterval');
@@ -543,6 +581,7 @@ class GitHubSyncManager {
             if (tokenInput) tokenInput.value = this.config.token || '';
             if (repoInput) repoInput.value = this.config.repo || '';
             if (branchInput) branchInput.value = this.config.branch || 'main';
+            if (syncPwdInput) syncPwdInput.value = this.config.syncPassword || '';
             if (timerCheckbox) timerCheckbox.checked = this.config.timerSync || false;
             if (intervalGroup) intervalGroup.style.display = this.config.timerSync ? 'block' : 'none';
             if (intervalSelect) intervalSelect.value = this.config.syncInterval || '30';

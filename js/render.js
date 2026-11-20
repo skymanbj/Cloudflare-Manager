@@ -367,6 +367,8 @@ Object.assign(CloudflareManager.prototype, {
                         ${zoneRemarkBtn}
                     </div>
                     <div class="zone-header-right">
+                        <button type="button" class="zone-mini-btn" data-action="purge-cache" title="一键清空此域名全部缓存">🧹 清缓存</button>
+                        <button type="button" class="zone-mini-btn ${zone.development_mode > 0 ? 'active' : ''}" data-action="dev-mode" data-active="${zone.development_mode > 0 ? 'on' : 'off'}" title="开启/关闭 3 小时开发模式（临时绕过缓存）">🛠️ 开发模式${zone.development_mode > 0 ? '·开' : ''}</button>
                         <span class="zone-record-count">${countText}</span>
                         <span class="zone-chevron">${CF_ICONS.chevron(14)}</span>
                     </div>
@@ -378,8 +380,18 @@ Object.assign(CloudflareManager.prototype, {
                 this.openRemarkModal('zone', zoneId, zoneName, countText);
             });
 
+            // 一键清缓存 & 开发模式
+            groupHeader.querySelector('[data-action="purge-cache"]').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.purgeZoneCache(zoneId, zoneName);
+            });
+            groupHeader.querySelector('[data-action="dev-mode"]').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleZoneDevMode(zoneId, zoneName, e.currentTarget);
+            });
+
             groupHeader.addEventListener('click', (e) => {
-                if (e.target.closest('[data-action="zone-remark"]')) return;
+                if (e.target.closest('[data-action="zone-remark"], [data-action="purge-cache"], [data-action="dev-mode"]')) return;
                 this.toggleZoneCollapse(zoneName);
             });
             groupContainer.appendChild(groupHeader);
@@ -396,7 +408,9 @@ Object.assign(CloudflareManager.prototype, {
                 records.forEach(record => {
                     const item = document.createElement('div');
                     item.className = 'record-item';
+                    const isChecked = this.selectedRecordIds?.has(record.id);
                     item.innerHTML = `
+                            <input type="checkbox" class="record-select-checkbox" ${isChecked ? 'checked' : ''} title="选择此记录用于批量操作">
                             <div class="record-type type-${record.type.toLowerCase()}">${record.type}</div>
                             <div class="record-info">
                                 <div class="record-name-row">
@@ -427,6 +441,10 @@ Object.assign(CloudflareManager.prototype, {
                             </div>
                         `;
 
+                    item.querySelector('.record-select-checkbox')?.addEventListener('change', (e) => {
+                        e.stopPropagation();
+                        this.toggleRecordSelection?.(record.id, e.target.checked);
+                    });
                     item.querySelector('[data-action="remark"]').addEventListener('click', (e) => {
                         this.handleRemarkButtonClick(e, 'dns', record.id, record.name, `${record.type} → ${record.content}`);
                     });
@@ -770,6 +788,7 @@ Object.assign(CloudflareManager.prototype, {
                         </div>
                     </div>
                     <div class="worker-actions">
+                        <button class="zone-mini-btn" data-action="inspect" title="查看环境变量、绑定与部署详情">📋 详情</button>
                         <a class="worker-url-btn" href="https://dash.cloudflare.com/${worker.account?.id || ''}/workers/services/view/${worker.id}/production" target="_blank" title="在 Dashboard 中查看">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -797,6 +816,10 @@ Object.assign(CloudflareManager.prototype, {
             item.querySelector('.dashboard-rename-link').addEventListener('click', (e) => {
                 e.preventDefault();
                 this.automateDashboardRename(e.currentTarget.href);
+            });
+
+            item.querySelector('[data-action="inspect"]')?.addEventListener('click', () => {
+                this.openWorkerDetailModal?.(worker);
             });
 
             item.querySelector('[data-action="delete"]').addEventListener('click', () => {
@@ -942,6 +965,7 @@ Object.assign(CloudflareManager.prototype, {
                         </div>
                     </div>
                     <div class="page-actions">
+                        <button class="zone-mini-btn" data-action="inspect" title="查看最近部署记录与环境变量">📋 详情</button>
                         <a class="page-url-btn" href="https://dash.cloudflare.com/${page.account?.id || ''}/pages/view/${page.name}" target="_blank" title="在 Dashboard 中查看">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -969,6 +993,10 @@ Object.assign(CloudflareManager.prototype, {
             item.querySelector('.dashboard-rename-link').addEventListener('click', (e) => {
                 e.preventDefault();
                 this.automateDashboardRename(e.currentTarget.href);
+            });
+
+            item.querySelector('[data-action="inspect"]')?.addEventListener('click', () => {
+                this.openPagesDetailModal?.(page);
             });
 
             item.querySelector('[data-action="delete"]').addEventListener('click', () => {

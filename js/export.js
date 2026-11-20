@@ -389,6 +389,13 @@ Object.assign(CloudflareManager.prototype, {
                 githubSyncConfig: githubConfig // Include GitHub config
             };
     
+            const pwd = prompt('🔐 安全导出选项：\n请输入一个“主密码”来加密导出文件（强烈建议）。\n如果不需要加密，请直接留空点“确定”；点击“取消”将中止导出。');
+            if (pwd === null) return;
+            if (pwd.length > 0 && this.encryptDataWithPassword) {
+                const encPayload = await this.encryptDataWithPassword(data, pwd);
+                Object.keys(data).forEach(k => delete data[k]);
+                Object.assign(data, { isEncryptedAccountConfig: true, exportDate: new Date().toISOString(), ...encPayload });
+            }
             const filename = `Cloudflare Manager-accounts-config-${new Date().toISOString().slice(0, 10)}.json`;
             await this.downloadJSON(data, filename);
             this.showToast(`账号配置已导出至 ${filename}`, 'success');
@@ -405,7 +412,19 @@ Object.assign(CloudflareManager.prototype, {
             reader.onload = async (e) => {
                 try {
                     const content = e.target.result;
-                    const data = JSON.parse(content);
+                    let data = JSON.parse(content);
+                    if (data.encrypted && data.isEncryptedAccountConfig) {
+                        const pwd = prompt('🔐 检测到加密的账号配置文件，请输入解密密码：');
+                        if (!pwd) {
+                            this.showToast('已取消导入', 'info');
+                            return;
+                        }
+                        try {
+                            data = await this.decryptDataWithPassword(data, pwd);
+                        } catch (decErr) {
+                            throw new Error('密码错误或文件已损坏，无法解密');
+                        }
+                    }
     
                     // Basic validation
                     if (!data.isAccountConfig || !Array.isArray(data.accounts)) {

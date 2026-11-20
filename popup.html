@@ -24,6 +24,12 @@
                         style="display: none;"></span></h1>
             </div>
             <div class="header-actions">
+                <button id="globalSearchBtn" class="icon-btn" title="跨账户全局搜索 (Ctrl+K)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
+                        <path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                </button>
                 <button id="exportBtn" class="icon-btn" title="导出当前账户数据">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor"
@@ -75,6 +81,8 @@
                     <select id="accountSelect" class="select-input sidebar-select">
                         <option value="">请选择账户</option>
                     </select>
+                    <button id="checkTokenPermBtn" class="btn-secondary btn-sm btn-block" style="margin-top: 8px;" title="检测当前账户 API Token 的各项权限状态">🩺 Token 权限体检</button>
+                    <div id="tokenPermResult" class="token-perm-result" style="display: none;"></div>
                 </div>
 
                 <!-- 添加/编辑账户 -->
@@ -134,6 +142,11 @@
                         <div class="form-group">
                             <label for="githubBranch">分支</label>
                             <input type="text" id="githubBranch" class="text-input" value="main">
+                        </div>
+                        <div class="form-group">
+                            <label for="githubSyncPassword">同步加密密码（可选）</label>
+                            <input type="password" id="githubSyncPassword" class="text-input" placeholder="设置后云端备份将 AES 加密">
+                            <small class="help-text">留空则明文同步；设置后多设备需填相同密码</small>
                         </div>
 
                         <!-- 定时同步设置 -->
@@ -308,6 +321,7 @@
                         <button id="clearSearchBtn" class="clear-search-btn" style="display: none;">×</button>
                     </div>
                     <button id="exportDnsBtn" class="btn-secondary btn-sm" title="导出DNS记录">📤 导出</button>
+                    <button id="dnsSnapshotsBtn" class="btn-secondary btn-sm" title="查看操作快照与导入恢复">📜 备份恢复</button>
                     <button id="addRecordBtn" class="btn-primary">+ 添加记录</button>
                 </div>
             </div>
@@ -315,6 +329,14 @@
             <!-- DNS 记录表单 -->
             <div id="recordForm" class="record-form" style="display: none;">
                 <h3 id="recordFormTitle" class="form-title">添加 DNS 记录</h3>
+                <div id="dnsTemplateBar" class="dns-template-bar">
+                    <span class="template-label">⚡ 快捷模板:</span>
+                    <button type="button" class="zone-mini-btn" data-dns-tpl="vercel-a">Vercel 根域名</button>
+                    <button type="button" class="zone-mini-btn" data-dns-tpl="vercel-cname">Vercel 子域名</button>
+                    <button type="button" class="zone-mini-btn" data-dns-tpl="github-pages">GitHub Pages (4条A)</button>
+                    <button type="button" class="zone-mini-btn" data-dns-tpl="qq-mail">腾讯企业邮</button>
+                    <button type="button" class="zone-mini-btn" data-dns-tpl="163-mail">网易企业邮</button>
+                </div>
                 <div class="form-group">
                     <label for="recordZone">域名</label>
                     <select id="recordZone" class="select-input"></select>
@@ -369,6 +391,17 @@
                 <div class="form-actions">
                     <button id="saveRecordBtn" class="btn-primary">保存记录</button>
                     <button id="cancelRecordBtn" class="btn-secondary">取消</button>
+                </div>
+            </div>
+
+            <!-- 批量操作栏 -->
+            <div id="dnsBatchBar" class="dns-batch-bar" style="display: none;">
+                <span class="batch-count">已选择 <strong id="dnsSelectedCount">0</strong> 条记录</span>
+                <div class="batch-actions">
+                    <button id="batchProxyOnBtn" class="btn-secondary btn-sm">🟠 批量开代理</button>
+                    <button id="batchProxyOffBtn" class="btn-secondary btn-sm">⚪ 批量关代理</button>
+                    <button id="batchDeleteRecordsBtn" class="btn-danger btn-sm">🗑️ 批量删除</button>
+                    <button id="clearRecordSelectionBtn" class="btn-secondary btn-sm">取消选择</button>
                 </div>
             </div>
 
@@ -648,6 +681,62 @@
         </div>
     </div>
 
+    <!-- Workers / Pages 详情与环境变量弹窗 -->
+    <div id="resourceDetailModal" class="modal" style="display: none;">
+        <div class="modal-overlay" id="resourceDetailOverlay"></div>
+        <div class="modal-content global-search-modal-content">
+            <div class="modal-header">
+                <h3 id="resourceDetailTitle">📋 项目详情与环境变量</h3>
+                <button id="closeResourceDetailBtn" class="btn-text">×</button>
+            </div>
+            <div class="modal-body" id="resourceDetailBody">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DNS 备份恢复与快照弹窗 -->
+    <div id="dnsSnapshotsModal" class="modal" style="display: none;">
+        <div class="modal-overlay" id="dnsSnapshotsOverlay"></div>
+        <div class="modal-content global-search-modal-content">
+            <div class="modal-header">
+                <h3>📜 DNS 备份恢复与防误删快照</h3>
+                <button id="closeDnsSnapshotsBtn" class="btn-text">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="snapshot-import-bar">
+                    <span>从导出的 DNS JSON 文件恢复：</span>
+                    <button id="importDnsJsonBtn" class="btn-secondary btn-sm">📥 选择 JSON 文件导入</button>
+                    <input type="file" id="importDnsJsonInput" accept=".json" style="display: none;">
+                </div>
+                <div class="help-text" style="margin: 8px 0 12px;">
+                    每次修改或删除 DNS 记录前，系统会自动保存一份快照，改错了可随时点击“恢复”。
+                </div>
+                <div id="dnsSnapshotsList" class="global-search-results"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 跨账户全局搜索弹窗 -->
+    <div id="globalSearchModal" class="modal" style="display: none;">
+        <div class="modal-overlay" id="globalSearchOverlay"></div>
+        <div class="modal-content global-search-modal-content">
+            <div class="modal-header">
+                <h3>🔍 跨账户全局搜索</h3>
+                <button id="closeGlobalSearchBtn" class="btn-text">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="global-search-bar">
+                    <input type="text" id="globalSearchInput" class="text-input"
+                        placeholder="输入域名、IP、DNS 记录、Worker、Pages、Tunnel 或备注关键词...">
+                    <button id="refreshAllCachesBtn" class="btn-secondary btn-sm" title="拉取所有已保存账户的最新数据到缓存">🔄 同步全部缓存</button>
+                </div>
+                <div id="globalSearchHint" class="help-text" style="margin: 6px 0 10px;"></div>
+                <div id="globalSearchResults" class="global-search-results"></div>
+            </div>
+        </div>
+    </div>
+
     <script src="js/github-sync.js"></script>
     <script src="popup.js"></script>
     <script src="js/api.js"></script>
@@ -656,6 +745,7 @@
     <script src="js/remark-editor.js"></script>
     <script src="js/export.js"></script>
     <script src="js/utils.js"></script>
+    <script src="js/features.js"></script>
 </body>
 
 </html>

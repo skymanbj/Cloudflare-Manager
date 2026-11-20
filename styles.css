@@ -4152,3 +4152,258 @@ textarea::placeholder {
   flex: 1;
   min-width: 0;
 }
+
+
+/* =====================================================
+   跨账户全局搜索弹窗
+   ===================================================== */
+.global-search-modal-content {
+  width: 680px;
+  max-width: 94vw;
+}
+
+.global-search-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.global-search-bar .text-input {
+  flex: 1;
+}
+
+.global-search-results {
+  max-height: 400px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.global-search-empty {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 24px 12px;
+  font-size: 13px;
+}
+
+.global-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.global-search-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--primary);
+}
+
+.gs-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.gs-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.gs-badge-zone { background: rgba(88, 166, 255, 0.16); color: var(--info); }
+.gs-badge-dns { background: rgba(63, 185, 80, 0.16); color: var(--success); }
+.gs-badge-worker { background: rgba(246, 130, 31, 0.18); color: var(--primary); }
+.gs-badge-page { background: rgba(210, 153, 34, 0.18); color: var(--warning); }
+.gs-badge-tunnel { background: rgba(163, 113, 247, 0.18); color: #a371f7; }
+
+.gs-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gs-subtitle {
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gs-item-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.gs-jump-hint {
+  font-size: 12px;
+  color: var(--primary);
+}
+
+/* 域名标题栏快捷按钮（清缓存 / 开发模式） */
+.zone-mini-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.zone-mini-btn:hover {
+  border-color: var(--primary);
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.zone-mini-btn.active {
+  border-color: var(--warning);
+  background: rgba(210, 153, 34, 0.18);
+  color: var(--warning);
+  font-weight: 600;
+}
+
+/* Token 权限体检结果 */
+.token-perm-result {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.perm-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.35;
+}
+
+.perm-ok { color: var(--success); }
+.perm-bad { color: var(--danger); }
+.perm-unknown { color: var(--text-secondary); }
+.perm-loading { color: var(--text-secondary); text-align: center; }
+
+/* DNS 批量操作栏与快照 */
+.dns-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-md);
+}
+
+.batch-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.record-select-checkbox {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+
+.snapshot-import-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+/* DNS 快捷模板栏 */
+.dns-template-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: var(--bg-dark);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.template-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-right: 2px;
+}
+
+/* Workers / Pages 详情弹窗 */
+.detail-section {
+  margin-bottom: 16px;
+}
+
+.detail-section h4 {
+  font-size: 13px;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.detail-empty {
+  padding: 12px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.detail-val {
+  color: var(--text-secondary);
+  margin-left: auto;
+  word-break: break-all;
+}
