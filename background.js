@@ -189,3 +189,63 @@ chrome.storage.local.get('githubSyncConfig', (result) => {
 });
 
 console.log("[CloudflareManager] Background service worker initialized");
+
+// =====================================================
+// Backup-All 总控自动备份接口
+// =====================================================
+chrome.runtime.onMessageExternal.addListener((request, _sender, sendResponse) => {
+  if (!request || typeof request !== 'object') return false;
+  if (request.type === 'BACKUP_ALL_PING') {
+    sendResponse({ ok: true, name: 'Cloudflare Information', protocol: 1 });
+    return false;
+  }
+  if (request.type === 'BACKUP_ALL_TRIGGER') {
+    (async () => {
+      try {
+        const { githubSyncConfig } = await chrome.storage.local.get('githubSyncConfig');
+        if (githubSyncConfig?.enabled && githubSyncConfig?.token && githubSyncConfig?.repo) {
+          const { cfRemarks } = await chrome.storage.local.get('cfRemarks');
+          const remarks = cfRemarks || {};
+          const remoteData = await GitHubSyncCore.getRemoteData(githubSyncConfig);
+          const merged = GitHubSyncCore.mergeRemarks(remarks, remoteData.remarks || {}, remoteData.deletedKeys || []);
+          await chrome.storage.local.set({ cfRemarks: merged.remarks });
+          const syncData = GitHubSyncCore.buildSyncPayload(merged.remarks, merged.allDeletedKeys);
+          await GitHubSyncCore.pushData(githubSyncConfig, syncData, remoteData.sha, 'Backup-All auto sync');
+          githubSyncConfig.lastSyncTime = new Date().toISOString();
+          await chrome.storage.local.set({ githubSyncConfig });
+          const stamp = new Date().toISOString().slice(0, 10);
+          sendResponse({
+            ok: true,
+            mode: 'cloud+json',
+            filename: `cloudflare-info-backup-${stamp}.json`,
+            data: {
+              type: 'cloudflare-info-backup',
+              exportedAt: new Date().toISOString(),
+              cfRemarks: merged.remarks
+            },
+            message: 'GitHub 同步成功 + 已存本地副本'
+          });
+        } else {
+          const { cfRemarks } = await chrome.storage.local.get('cfRemarks');
+          const payload = {
+            type: 'cloudflare-info-backup',
+            exportedAt: new Date().toISOString(),
+            cfRemarks: cfRemarks || {}
+          };
+          const stamp = new Date().toISOString().slice(0, 10);
+          sendResponse({
+            ok: true,
+            mode: 'json',
+            filename: `cloudflare-info-backup-${stamp}.json`,
+            data: payload,
+            message: 'GitHub 同步未启用，已导出本地备注备份'
+          });
+        }
+      } catch (error) {
+        sendResponse({ ok: false, message: `备份失败：${error?.message || error}` });
+      }
+    })();
+    return true;
+  }
+  return false;
+});

@@ -47,6 +47,71 @@ const CF_ICONS = {
  */
 const PINNED_ACCOUNT = 'liubohn69@gmail.com';
 
+/**
+ * 同一账户在 Cloudflare API、本地配置和历史备注里可能分别写作简写和完整邮箱名，
+ * 例如 "lbylylzy" / "Lbylylzy@gmail.com's Account"。这里统一归并，避免重复分组。
+ */
+const ACCOUNT_ALIAS_GROUPS = [
+    ['liubohn69@gmail.com', 'liubohn69', '1 liubohn69'],
+    ['lbylylzy@gmail.com', 'lbylylzy']
+];
+
+function normalizeAccountText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .trim()
+        .replace(/'s\s+account$/, '')
+        .replace(/\s+account$/, '')
+        .trim();
+}
+
+function accountNameToken(value) {
+    const normalized = normalizeAccountText(value);
+    // "Lbylylzy@gmail.com's Account" → "lbylylzy"；"lbylylzy" 保持不变
+    const localPart = normalized.split('@')[0];
+    return localPart.replace(/[^a-z0-9]/g, '');
+}
+
+function accountAliasGroup(name) {
+    const token = accountNameToken(name);
+    if (!token) return null;
+    return ACCOUNT_ALIAS_GROUPS.find(group => group.some(alias => accountNameToken(alias) === token)) || null;
+}
+
+/**
+ * 账户身份 key：别名组优先，其余用真实 account.id 区分，未知账户兜底。
+ */
+function accountIdentity(accountOrName) {
+    const account = typeof accountOrName === 'string' ? null : accountOrName;
+    const name = typeof accountOrName === 'string' ? accountOrName : (account?.name || '');
+
+    if (isPinnedAccount(accountOrName)) return '__pinned__';
+
+    const aliasGroup = accountAliasGroup(name);
+    if (aliasGroup) {
+        const pinnedToken = accountNameToken(PINNED_ACCOUNT);
+        return aliasGroup.some(alias => accountNameToken(alias) === pinnedToken)
+            ? '__pinned__'
+            : `alias:${accountNameToken(aliasGroup[0])}`;
+    }
+
+    if (account?.id) return `id:${account.id}`;
+
+    const token = accountNameToken(name);
+    return token ? `name:${token}` : '__unknown__';
+}
+
+/** 合并分组时优先保留信息更完整的账户名（带邮箱的完整名称优先）。 */
+function preferAccountName(candidate, current) {
+    if (!candidate) return false;
+    if (!current) return true;
+    const score = (value) => {
+        const normalized = normalizeAccountText(value);
+        return (normalized.includes('@') ? 100 : 0) + normalized.length;
+    };
+    return score(candidate) > score(current);
+}
+
 function isPinnedAccount(accountOrName) {
     const name = (typeof accountOrName === 'string'
         ? accountOrName
@@ -226,7 +291,10 @@ Object.assign(CloudflareManager.prototype, {
                     // 如果本地已经有 accountId (从缓存加载的)，则直接使用
                     const realAccountId = await this.getAccountId();
                     if (realAccountId && this.currentAccount && this.currentAccount.id === renderAccountLocalId) {
-                        const colorClass = this.getAccountColorClass(realAccountId);
+                        const colorClass = this.getAccountColorClass(accountIdentity({
+                            id: realAccountId,
+                            name: this.currentAccount.name
+                        }));
                         headerAccountName.classList.add(colorClass);
                     }
                 } catch (e) {
@@ -247,7 +315,7 @@ Object.assign(CloudflareManager.prototype, {
         this.getOrderedAccounts().forEach(account => {
             const option = document.createElement('option');
             option.value = account.id;
-            option.textContent = account.name;
+            option.textContent = account.tokenName ? `${account.name} · ${account.tokenName}` : account.name;
             if (this.currentAccount?.id === account.id) {
                 option.selected = true;
             }
@@ -318,42 +386,73 @@ Object.assign(CloudflareManager.prototype, {
             list.appendChild(searchInfo);
         }
 
-        // 渲染域名分组
-        zonesToRender.sort((a, b) => {
-            const accountA = a.account?.name || '';
-            const accountB = b.account?.name || '';
-            // 置顶账号的域名分组排在最前
-            const rankA = pinnedAccountRank(accountA);
-            const rankB = pinnedAccountRank(accountB);
-            if (rankA !== rankB) return rankA - rankB;
-            if (accountA !== accountB) {
-                return accountA.localeCompare(accountB);
+        // 按账户分组渲染：账户名单独作为分组标题，域名行不再显示账户标签
+        const accountGroups = new Map();
+        zonesToRender.forEach(zone => {
+            const account = zone.account || {};
+            const key = accountIdentity(account);
+            if (!accountGroups.has(key)) {
+                accountGroups.set(key, {
+                    key,
+                    id: account.id || '',
+                    name: account.name || '未知账号',
+                    zones: []
+                });
             }
-            return a.name.localeCompare(b.name);
-        }).forEach(zone => {
+            const group = accountGroups.get(key);
+            if (preferAccountName(account.name, group.name)) {
+                group.name = account.name;
+                group.id = account.id || group.id;
+            }
+            group.zones.push(zone);
+        });
+
+        const sortedAccountGroups = Array.from(accountGroups.values()).sort((a, b) => {
+            if (a.key === '__unknown__') return 1;
+            if (b.key === '__unknown__') return -1;
+            const rankA = a.key === '__pinned__' ? -1 : 0;
+            const rankB = b.key === '__pinned__' ? -1 : 0;
+            if (rankA !== rankB) return rankA - rankB;
+            return a.name.localeCompare(b.name, 'zh-CN');
+        });
+
+        sortedAccountGroups.forEach(group => {
+            group.zones.sort((a, b) => a.name.localeCompare(b.name));
+
+            const collapseKey = `dns:${group.key}`;
+            const isCollapsed = this.collapsedAccountGroups.has(collapseKey);
+            const colorClass = group.key === '__unknown__'
+                ? 'account-color-default'
+                : this.getAccountColorClass(group.key);
+            const domainCount = group.zones.length;
+            const recordCount = group.zones.reduce((sum, z) => sum + (groupedRecords[z.name] || []).length, 0);
+
+            const accountHeader = document.createElement('div');
+            accountHeader.className = `dns-account-group-header ${isCollapsed ? 'collapsed' : ''}`;
+            accountHeader.innerHTML = `
+                    <span class="account-group-toggle">${CF_ICONS.chevron(14)}</span>
+                    <span class="account-group-dot ${colorClass}"></span>
+                    <span class="dns-account-group-title">${this.escapeHtml(group.name)}</span>
+                    <span class="dns-account-group-count">${domainCount} 个域名 · ${recordCount} 条记录</span>
+                `;
+            list.appendChild(accountHeader);
+
+            const zoneElements = [];
+            group.zones.forEach(zone => {
             const zoneName = zone.name;
             const records = groupedRecords[zoneName] || [];
-            const isCollapsed = this.collapsedZones.has(zoneName);
+            const zoneCollapsed = this.collapsedZones.has(zoneName);
 
             // 域名分组容器
             const groupContainer = document.createElement('div');
             groupContainer.className = 'zone-group';
+            groupContainer.style.display = isCollapsed ? 'none' : '';
 
-            // 获取 zoneId 和账户信息
             const zoneId = zone.id;
-            const accountName = zone.account?.name || '';
-            const accountId = zone.account?.id || '';
-
-            // 生成账户标签 HTML
-            let accountTagHtml = '';
-            if (accountName) {
-                const colorClass = this.getAccountColorClass(accountId);
-                accountTagHtml = `<span class="account-tag ${colorClass}" title="所属账户: ${this.escapeHtml(accountName)}">${this.escapeHtml(accountName)}</span>`;
-            }
 
             // 域名分组标题（可点击折叠）
             const groupHeader = document.createElement('div');
-            groupHeader.className = `zone-group-header ${isCollapsed ? 'collapsed' : ''}`;
+            groupHeader.className = `zone-group-header ${zoneCollapsed ? 'collapsed' : ''}`;
             const zoneRemarkBtn = this.getRemarkButtonHtml('zone', zoneId, '添加域名备注').replace('data-action="remark"', 'data-action="zone-remark"');
 
             // 如果没有记录，可以在数量显示上做区分
@@ -362,13 +461,12 @@ Object.assign(CloudflareManager.prototype, {
             groupHeader.innerHTML = `
                     <div class="zone-header-left">
                         <span class="zone-icon">${CF_ICONS.globe(16)}</span>
-                        <span class="zone-name">${this.escapeHtml(zoneName)}</span>
-                        ${accountTagHtml}
+                            <span class="zone-name" title="${this.escapeHtml(zoneName)}">${this.escapeHtml(zoneName)}</span>
                         ${zoneRemarkBtn}
                     </div>
                     <div class="zone-header-right">
-                        <button type="button" class="zone-mini-btn" data-action="purge-cache" title="一键清空此域名全部缓存">🧹 清缓存</button>
-                        <button type="button" class="zone-mini-btn ${zone.development_mode > 0 ? 'active' : ''}" data-action="dev-mode" data-active="${zone.development_mode > 0 ? 'on' : 'off'}" title="开启/关闭 3 小时开发模式（临时绕过缓存）">🛠️ 开发模式${zone.development_mode > 0 ? '·开' : ''}</button>
+                            <button type="button" class="zone-mini-btn" data-action="purge-cache" title="清空 Cloudflare CDN 边缘缓存，不是浏览器缓存（需 Zone - Cache Purge:Edit 权限）">🧹 清缓存</button>
+                            <button type="button" class="zone-mini-btn ${zone.development_mode > 0 ? 'active' : ''}" data-action="dev-mode" data-active="${zone.development_mode > 0 ? 'on' : 'off'}" title="开启/关闭 3 小时开发模式，临时绕过 Cloudflare 缓存（需 Zone - Zone Settings:Edit 权限）">🛠️ 开发模式${zone.development_mode > 0 ? '·开' : ''}</button>
                         <span class="zone-record-count">${countText}</span>
                         <span class="zone-chevron">${CF_ICONS.chevron(14)}</span>
                     </div>
@@ -398,7 +496,7 @@ Object.assign(CloudflareManager.prototype, {
 
             // 记录列表容器
             const recordsContainer = document.createElement('div');
-            recordsContainer.className = `zone-records ${isCollapsed ? 'collapsed' : ''}`;
+            recordsContainer.className = `zone-records ${zoneCollapsed ? 'collapsed' : ''}`;
 
             if (records.length === 0) {
                 recordsContainer.classList.add('empty-records-container');
@@ -463,7 +561,19 @@ Object.assign(CloudflareManager.prototype, {
             }
 
             groupContainer.appendChild(recordsContainer);
+            zoneElements.push(groupContainer);
             list.appendChild(groupContainer);
+            });
+
+            accountHeader.addEventListener('click', () => {
+                const collapsed = accountHeader.classList.toggle('collapsed');
+                if (collapsed) {
+                    this.collapsedAccountGroups.add(collapseKey);
+                } else {
+                    this.collapsedAccountGroups.delete(collapseKey);
+                }
+                zoneElements.forEach(el => { el.style.display = collapsed ? 'none' : ''; });
+            });
         });
 
         // 渲染后同步「全部展开/折叠」按钮的文案与图标
@@ -625,13 +735,12 @@ Object.assign(CloudflareManager.prototype, {
     // 账号分组（Workers / Pages 共用）
     // =====================================================
     /**
-     * 账号分组键：置顶账号（liubohn69@gmail.com 与简写 liubohn69）合并为同一分组，
+     * 账号分组键：已知别名（如 liubohn69 / lbylylzy 的简写与完整邮箱名）合并为同一分组，
      * 其余账号按 account.id 区分。
      */
     accountGroupKey(account) {
         if (!account) return '__unknown__';
-        if (isPinnedAccount(account)) return '__pinned__';
-        return account.id || '__unknown__';
+        return accountIdentity(account);
     }
     ,
 
@@ -649,10 +758,8 @@ Object.assign(CloudflareManager.prototype, {
                 });
             }
             const group = groups.get(key);
-            // 合并时优先使用带完整邮箱的名称作为分组标题
-            if (key === '__pinned__' && account?.name
-                && account.name.toLowerCase().includes(PINNED_ACCOUNT)
-                && !group.name.toLowerCase().includes(PINNED_ACCOUNT)) {
+            // 合并时优先使用带完整邮箱的名称作为分组标题与颜色依据
+            if (preferAccountName(account?.name, group.name)) {
                 group.name = account.name;
                 group.id = account.id || group.id;
             }
@@ -675,7 +782,7 @@ Object.assign(CloudflareManager.prototype, {
         const isCollapsed = this.collapsedAccountGroups.has(collapseKey);
         const colorClass = group.key === '__unknown__'
             ? 'account-color-default'
-            : this.getAccountColorClass(group.id);
+            : this.getAccountColorClass(group.key);
 
         const groupDiv = document.createElement('div');
         groupDiv.className = `account-group ${isCollapsed ? 'collapsed' : ''}`;

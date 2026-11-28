@@ -324,9 +324,24 @@ body {
   border: 1px solid var(--primary);
 }
 
+.account-list-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .account-list-item-name {
   font-weight: 500;
   color: var(--text-primary);
+}
+
+.account-list-item-token-name {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .account-list-item-actions {
@@ -940,19 +955,12 @@ body {
   font-size: 13.5px;
   font-weight: 600;
   color: var(--primary);
+  /* 账户标签已移到独立分组标题；域名保持单行，鼠标悬停 title 可看完整名称 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 170px;
-}
-
-.zone-header-left .account-tag {
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-left: 4px;
-  flex-shrink: 1;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .zone-record-count {
@@ -1006,6 +1014,52 @@ body {
   color: var(--text-primary);
   font-size: 13px;
   transition: all var(--transition-fast);
+}
+
+.token-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.token-input-wrap .text-input {
+  width: 100%;
+  padding-right: 38px;
+}
+
+.token-visibility-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.token-visibility-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.token-visibility-btn .icon-eye-off {
+  display: none;
+}
+
+.token-visibility-btn.visible .icon-eye {
+  display: none;
+}
+
+.token-visibility-btn.visible .icon-eye-off {
+  display: block;
 }
 
 .select-input:focus,
@@ -3137,11 +3191,24 @@ textarea::placeholder {
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+/* 备注按钮始终紧跟账户标签，空间不足时只压缩域名/账户文字 */
+.zone-header-left .remark-btn {
+  flex: 0 0 auto;
+}
+
+.zone-header-left .account-tag {
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .zone-name {
   margin-right: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .form-help {
@@ -4406,4 +4473,72 @@ textarea::placeholder {
   color: var(--text-secondary);
   margin-left: auto;
   word-break: break-all;
+}
+
+/* DNS 列表：账户名单独成组标题，跨列显示 */
+.dns-account-group-header {
+  column-span: all;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 9px 12px;
+  margin: 2px 0 12px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  user-select: none;
+  break-inside: avoid;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.dns-account-group-header:hover {
+  background: var(--bg-input);
+  border-color: var(--primary);
+}
+
+.dns-account-group-header.collapsed .account-group-toggle {
+  transform: rotate(-90deg);
+}
+
+.dns-account-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dns-account-group-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* 压缩域名行右侧部件，给域名留出单行空间 */
+.zone-group-header {
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.zone-header-left {
+  gap: 4px;
+}
+
+.zone-header-right {
+  gap: 4px;
+}
+
+.zone-mini-btn {
+  padding: 2px 5px;
+  font-size: 10px;
+}
+
+.zone-record-count {
+  padding: 2px 5px;
+  font-size: 10px;
 }

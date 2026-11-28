@@ -17,6 +17,12 @@ Object.assign(CloudflareManager.prototype, {
     resolveRemarkAccount(remark) {
         const storedId = remark.accountId && remark.accountId !== 'unknown' ? remark.accountId : '';
         const storedName = remark.accountName && remark.accountName !== '未知账号' ? remark.accountName : '';
+        // 分组 key 走统一账户身份，简写与完整邮箱名合并；id/name 仅用于展示
+        const toAccount = (id, name) => ({
+            key: accountIdentity({ id, name }),
+            id: id || '',
+            name: name || ''
+        });
 
         // 域名 / DNS 备注：以已加载域名的真实所属账号为准，
         // 避免保存时误用「当前账号」导致备注归错分组
@@ -34,12 +40,12 @@ Object.assign(CloudflareManager.prototype, {
             }
             if (liveZone && liveZone.account && liveZone.account.name) {
                 const liveId = liveZone.account.id || '';
-                return { key: liveId || liveZone.account.name, id: liveId, name: liveZone.account.name };
+                return toAccount(liveId, liveZone.account.name);
             }
         }
 
         if (storedName) {
-            return { key: storedId || storedName, id: storedId, name: storedName };
+            return toAccount(storedId, storedName);
         }
 
         let id = '';
@@ -85,7 +91,7 @@ Object.assign(CloudflareManager.prototype, {
         }
 
         if (name) {
-            return { key: id || name, id, name };
+            return toAccount(id, name);
         }
         return { key: '__unknown__', id: '', name: '未知账号' };
     }
@@ -428,7 +434,13 @@ Object.assign(CloudflareManager.prototype, {
                         remarks: []
                     });
                 }
-                grouped.get(key).remarks.push(remark);
+                const group = grouped.get(key);
+                // 与 Workers/Pages 一致：合并后保留信息更完整的账户名
+                if (preferAccountName(remark.accountDisplayName, group.name)) {
+                    group.name = remark.accountDisplayName;
+                    group.id = remark.accountDisplayId || group.id;
+                }
+                group.remarks.push(remark);
             });
 
             // 按各分组中最新备注的修改时间从新到旧排序，未知账号始终排在最后
@@ -448,7 +460,7 @@ Object.assign(CloudflareManager.prototype, {
                 const isCollapsed = this.collapsedAccountGroups.has(collapseKey);
                 const colorClass = group.key === '__unknown__'
                     ? 'account-color-default'
-                    : this.getAccountColorClass(group.id);
+                    : this.getAccountColorClass(group.key);
                 const groupDiv = document.createElement('div');
                 groupDiv.className = `remarks-group account-group-notes ${isCollapsed ? 'collapsed' : ''}`;
                 groupDiv.innerHTML = `

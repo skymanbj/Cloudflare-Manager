@@ -317,7 +317,10 @@ Object.assign(CloudflareManager.prototype, {
             // 设置账户标签 HTML
             let accountInfoHtml = '';
             if (this.currentRemarkTarget.accountName && this.currentRemarkTarget.accountName !== '未知账号') {
-                const colorClass = this.getAccountColorClass(this.currentRemarkTarget.accountId);
+                const colorClass = this.getAccountColorClass(accountIdentity({
+                    id: this.currentRemarkTarget.accountId,
+                    name: this.currentRemarkTarget.accountName
+                }));
                 accountInfoHtml = `<span class="account-tag ${colorClass}" style="margin-left: 8px; vertical-align: middle;">${this.escapeHtml(this.currentRemarkTarget.accountName)}</span>`;
             }
     

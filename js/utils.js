@@ -85,53 +85,76 @@ Object.assign(CloudflareManager.prototype, {
          */
         downloadCSV(csvContent, filename) {
             return new Promise((resolve) => {
-                // 添加 BOM 以确保 Excel 正确识别 UTF-8 编码
                 const BOM = '\uFEFF';
-                const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-                const url = URL.createObjectURL(blob);
-    
-                // 使用 <a> 标签下载
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-    
-                setTimeout(() => {
-                    URL.revokeObjectURL(url);
-                }, 1000);
-    
-                resolve({ success: true, filename: filename });
+                const fullText = BOM + csvContent;
+                const fallback = () => {
+                    const blob = new Blob([fullText], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => { URL.revokeObjectURL(url); }, 1000);
+                    resolve({ success: true, filename });
+                };
+                try {
+                    chrome.runtime.sendMessage(
+                        'dpebkkojhmgilchcgddgbknfpcnlcfna',
+                        { type: 'BACKUP_ALL_SAVE_FILE', filename, content: fullText, mimeType: 'text/csv' },
+                        (resp) => {
+                            if (!chrome.runtime.lastError && resp?.ok) {
+                                this.showToast?.(`已保存到 ${resp.path}`, 'success');
+                                resolve({ success: true, filename, path: resp.path });
+                            } else {
+                                fallback();
+                            }
+                        }
+                    );
+                } catch {
+                    fallback();
+                }
             });
         }
 ,
 
         /**
-         * 使用 chrome.downloads API 下载 JSON 文件
+         * 使用 Backup-All 固定目录静默保存 JSON，不可用时回退到浏览器下载
          * @returns {Promise<{success: boolean, filename?: string}>}
          */
         downloadJSON(data, filename) {
             console.log('downloadJSON 接收到的文件名:', filename);
             return new Promise((resolve) => {
                 const jsonString = JSON.stringify(data, null, 2);
-                const blob = new Blob([jsonString], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-    
-                // 使用 <a> 标签下载，确保文件名正确
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-    
-                // 延迟清理 URL
-                setTimeout(() => {
-                    URL.revokeObjectURL(url);
-                }, 1000);
-    
-                resolve({ success: true, filename: filename });
+                const fallback = () => {
+                    const blob = new Blob([jsonString], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => { URL.revokeObjectURL(url); }, 1000);
+                    resolve({ success: true, filename });
+                };
+                try {
+                    chrome.runtime.sendMessage(
+                        'dpebkkojhmgilchcgddgbknfpcnlcfna',
+                        { type: 'BACKUP_ALL_SAVE_FILE', filename, content: jsonString, mimeType: 'application/json' },
+                        (resp) => {
+                            if (!chrome.runtime.lastError && resp?.ok) {
+                                this.showToast?.(`已保存到 ${resp.path}`, 'success');
+                                resolve({ success: true, filename, path: resp.path });
+                            } else {
+                                fallback();
+                            }
+                        }
+                    );
+                } catch {
+                    fallback();
+                }
             });
         }
 ,
@@ -210,4 +233,13 @@ Object.assign(CloudflareManager.prototype, {
             return suffix ? `Cloudflare Manager-${safeAccountName}-${suffix}-${dateTime}.json` : `Cloudflare Manager-${safeAccountName}-${dateTime}.json`;
         }
 ,
+});
+
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('openBackupDirBtn')?.addEventListener('click', () => {
+        try {
+            chrome.runtime.sendMessage('dpebkkojhmgilchcgddgbknfpcnlcfna', { type: 'BACKUP_ALL_OPEN_FOLDER' });
+        } catch {}
+    });
 });

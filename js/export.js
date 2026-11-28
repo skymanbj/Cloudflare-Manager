@@ -383,6 +383,7 @@ Object.assign(CloudflareManager.prototype, {
                 accounts: this.accounts.map(acc => ({
                     id: acc.id, // Usually the email or unique ID
                     name: acc.name,
+                    tokenName: acc.tokenName || '',
                     token: acc.token
                     // Do not export color or internal state if not needed, but token is key
                 })),
@@ -477,6 +478,7 @@ Object.assign(CloudflareManager.prototype, {
                             newAccounts.push({
                                 id: acc.id || acc.name, // Fallback ID
                                 name: acc.name,
+                                tokenName: acc.tokenName || '',
                                 token: acc.token
                             });
                             addedCount++;

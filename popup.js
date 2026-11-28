@@ -253,6 +253,7 @@ class CloudflareManager {
 
         // Account management (in sidebar)
         document.getElementById('saveAccountBtn')?.addEventListener('click', () => this.saveAccount());
+        document.getElementById('toggleTokenVisibilityBtn')?.addEventListener('click', () => this.toggleTokenVisibility());
         document.getElementById('deleteAccountBtn')?.addEventListener('click', () => this.deleteAccount());
         document.getElementById('accountSelect')?.addEventListener('change', (e) => this.switchAccount(e.target.value));
 
@@ -543,6 +544,7 @@ class CloudflareManager {
         if (!account) return;
 
         document.getElementById('accountName').value = account.name;
+        document.getElementById('tokenName').value = account.tokenName || '';
         document.getElementById('apiToken').value = account.token;
         document.getElementById('deleteAccountBtn').style.display = 'block';
 
@@ -551,13 +553,33 @@ class CloudflareManager {
 
     clearAccountForm() {
         document.getElementById('accountName').value = '';
+        document.getElementById('tokenName').value = '';
         document.getElementById('apiToken').value = '';
         document.getElementById('deleteAccountBtn').style.display = 'none';
         this.editingAccountId = null;
+        this.setTokenVisibility(false);
+    }
+
+    setTokenVisibility(visible) {
+        const input = document.getElementById('apiToken');
+        const btn = document.getElementById('toggleTokenVisibilityBtn');
+        if (!input || !btn) return;
+        input.type = visible ? 'text' : 'password';
+        btn.classList.toggle('visible', visible);
+        const label = visible ? '隐藏 Token' : '显示 Token';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+    }
+
+    toggleTokenVisibility() {
+        const input = document.getElementById('apiToken');
+        if (!input) return;
+        this.setTokenVisibility(input.type === 'password');
     }
 
     async saveAccount() {
         const name = document.getElementById('accountName').value.trim();
+        const tokenName = document.getElementById('tokenName').value.trim();
         const token = document.getElementById('apiToken').value.trim();
 
         if (!name || !token) {
@@ -588,6 +610,7 @@ class CloudflareManager {
                     this.accounts[index] = {
                         ...this.accounts[index],
                         name,
+                        tokenName,
                         token,
                         zonesCount: zones.length
                     };
@@ -601,6 +624,7 @@ class CloudflareManager {
                 const newAccount = {
                     id: Date.now().toString(),
                     name,
+                    tokenName,
                     token,
                     zonesCount: zones.length
                 };
@@ -637,7 +661,10 @@ class CloudflareManager {
 
         listEl.innerHTML = this.getOrderedAccounts().map(account => `
             <div class="account-list-item ${this.currentAccount?.id === account.id ? 'active' : ''}" data-id="${account.id}">
-                <span class="account-list-item-name">${this.escapeHtml(account.name)}</span>
+                <span class="account-list-item-main">
+                    <span class="account-list-item-name">${this.escapeHtml(account.name)}</span>
+                    ${account.tokenName ? `<span class="account-list-item-token-name" title="Token 名称：${this.escapeHtml(account.tokenName)}">${this.escapeHtml(account.tokenName)}</span>` : ''}
+                </span>
                 <div class="account-list-item-actions">
                     <button class="account-list-item-btn" data-action="edit" title="编辑">✏️</button>
                     <button class="account-list-item-btn danger" data-action="delete" title="删除">🗑️</button>

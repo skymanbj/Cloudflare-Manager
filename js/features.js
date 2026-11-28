@@ -252,7 +252,7 @@ Object.assign(CloudflareManager.prototype, {
                     <span class="gs-subtitle">${this.escapeHtml(item.subtitle)}</span>
                 </div>
                 <div class="gs-item-account">
-                    <span class="account-tag ${this.getAccountColorClass(item.accountId)}">${this.escapeHtml(item.accountName)}</span>
+                    <span class="account-tag ${this.getAccountColorClass(accountIdentity({ id: item.accountId, name: item.accountName }))}">${this.escapeHtml(item.accountName)}</span>
                     <span class="gs-jump-hint">跳转 →</span>
                 </div>
             `;
@@ -301,31 +301,51 @@ Object.assign(CloudflareManager.prototype, {
 // 2. 一键清缓存 & 开发模式开关
 // =====================================================
 Object.assign(CloudflareManager.prototype, {
-    async purgeZoneCache(zoneId, zoneName) {
-        if (!confirm(`确定要清空域名「${zoneName}」的全部 Cloudflare 缓存吗？`)) return;
+    /** 把 Cloudflare 的权限类错误翻译成简短可操作的提示。 */
+    async explainZoneActionError(err, permission) {
+        const message = err?.message || '未知错误';
+        const authIssue = /authentication|permission|forbidden|unauthorized|not authorized|9109|10000|403|权限/i.test(message);
+        if (!authIssue) return message;
+
+        // 区分「Token 无效/账户选错」和「Token 有效但权限/域名范围不足」
         try {
-            this.showToast(`正在清空 ${zoneName} 缓存...`, 'info');
+            await this.apiRequest('/user/tokens/verify');
+            return `Token 有效，但缺少「${permission}」或该域名不在 Token 的 Zone Resources 范围内`;
+        } catch {
+            return `Token 无效/过期，或当前选错账户（${message}）`;
+        }
+    },
+
+    async purgeZoneCache(zoneId, zoneName) {
+        if (!confirm(`确定要清空域名「${zoneName}」的全部 Cloudflare 边缘缓存吗？\n\n这清的是 Cloudflare CDN 缓存，不是浏览器缓存；清空后访客会重新回源获取最新内容。`)) return;
+        try {
+            this.showToast(`正在清空 ${zoneName} 的 Cloudflare 缓存...`, 'info');
             await this.apiRequest(`/zones/${zoneId}/purge_cache`, 'POST', { purge_everything: true });
-            this.showToast(`已清空「${zoneName}」全部缓存`, 'success');
+            this.showToast(`已清空「${zoneName}」的全部 Cloudflare 边缘缓存`, 'success');
         } catch (err) {
-            this.showToast(`清缓存失败: ${err.message}`, 'error');
+            this.showToast(`清缓存失败: ${await this.explainZoneActionError(err, 'Zone - Cache Purge:Edit')}`, 'error');
         }
     },
 
     async toggleZoneDevMode(zoneId, zoneName, btnEl) {
         try {
-            const current = await this.apiRequest(`/zones/${zoneId}/settings/development_mode`, 'GET');
-            const isCurrentlyOn = current?.value === 'on';
+            const zoneObj = this.zones?.find(z => z.id === zoneId);
+            // 不再 GET 读取状态：部分 Token 没有 Zone Settings:Read，GET 会直接 403。
+            // 按钮的 data-active 与已加载 zone 状态都来自当前渲染，足够判断开关方向。
+            const isCurrentlyOn = btnEl?.dataset?.active === 'on'
+                || (zoneObj && (zoneObj.development_mode === 'on' || Number(zoneObj.development_mode) > 0));
             const nextValue = isCurrentlyOn ? 'off' : 'on';
             await this.apiRequest(`/zones/${zoneId}/settings/development_mode`, 'PATCH', { value: nextValue });
 
-            const zoneObj = this.zones?.find(z => z.id === zoneId);
             if (zoneObj) zoneObj.development_mode = nextValue === 'on' ? 10800 : 0;
 
             if (btnEl) {
                 btnEl.dataset.active = nextValue;
                 btnEl.classList.toggle('active', nextValue === 'on');
                 btnEl.textContent = nextValue === 'on' ? '🛠️ 开发模式·开' : '🛠️ 开发模式';
+                btnEl.title = nextValue === 'on'
+                    ? '开发模式已开启，3 小时后自动关闭；点击可关闭'
+                    : '开启 3 小时开发模式，临时绕过 Cloudflare 缓存（需 Zone - Zone Settings:Edit 权限）';
             }
             this.showToast(
                 nextValue === 'on'
@@ -334,7 +354,7 @@ Object.assign(CloudflareManager.prototype, {
                 'success'
             );
         } catch (err) {
-            this.showToast(`切换开发模式失败: ${err.message}`, 'error');
+            this.showToast(`切换开发模式失败: ${await this.explainZoneActionError(err, 'Zone - Zone Settings:Edit')}`, 'error');
         }
     }
 });
@@ -392,6 +412,7 @@ Object.assign(CloudflareManager.prototype, {
                 || '';
 
             const dnsRes = firstZoneId ? await probe(`/zones/${firstZoneId}/dns_records?per_page=1`) : null;
+            const devModeRes = firstZoneId ? await probe(`/zones/${firstZoneId}/settings/development_mode`) : null;
             const workersRes = firstAccId ? await probe(`/accounts/${firstAccId}/workers/scripts`) : null;
             const pagesRes = firstAccId ? await probe(`/accounts/${firstAccId}/pages/projects?per_page=1`) : null;
             const tunnelRes = firstAccId ? await probe(`/accounts/${firstAccId}/cfd_tunnel?per_page=1`) : null;
@@ -414,6 +435,9 @@ Object.assign(CloudflareManager.prototype, {
             items.push(dnsRes === null
                 ? { unknown: true, label: 'DNS 记录（账号下暂无域名，无法探测）' }
                 : { ok: dnsRes.ok, label: 'DNS 记录读取 (DNS:Read)' });
+            items.push(devModeRes === null
+                ? { unknown: true, label: '开发模式设置（账号下暂无域名，无法探测）' }
+                : { ok: devModeRes.ok, label: '开发模式开关 (Zone Settings:Edit)' });
             items.push(workersRes === null
                 ? { unknown: true, label: 'Workers（未获取到 Account ID）' }
                 : { ok: workersRes.ok, label: 'Workers 管理 (Workers:Read)' });
